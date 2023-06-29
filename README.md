@@ -20,7 +20,8 @@ These contributors helped create the UMSKT project that this codebase was based 
 * [The Rust toolchain](https://rustup.rs/)
 
 ## Build Steps
-1. `cargo build`
+1. Place `keys.json` in the project root
+2. `cargo build`
 
 ## Run Steps
 This crate includes a CLI binary (`mskey`) that can be used to interact with the underlying algorithms.
