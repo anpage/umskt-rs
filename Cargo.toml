@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "umskt",
+    "mskey",
+]
+
+[profile.release]
+lto = true
+
+[profile.release.package.mskey]
+strip = true
+opt-level = "z"
+codegen-units = 1
