@@ -29,3 +29,7 @@ It can be run with a simple:
 * `cargo run`
 
 It will print out the help/usage info by default.
+
+Arguments to `mskey` need to come after `--`, like this:
+
+`cargo run -- generate`
