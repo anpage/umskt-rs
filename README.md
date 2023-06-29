@@ -21,3 +21,10 @@ These contributors helped create the UMSKT project that this codebase was based 
 
 ## Build Steps
 1. `cargo build`
+
+## Run Steps
+This crate includes a CLI binary (`mskey`) that can be used to interact with the underlying algorithms.
+It can be run with a simple:
+* `cargo run`
+
+It will print out the help/usage info by default.
