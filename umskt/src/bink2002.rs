@@ -57,9 +57,8 @@ impl ProductKey {
             Some(auth_info) => auth_info,
             None => {
                 let mut rng = rand::thread_rng();
-                let random: BigInt = rng.sample(RandomBits::new(32));
-                let raw = u32::from_be_bytes(random.to_bytes_be().1[0..4].try_into().unwrap());
-                raw % (bitmask(10) as u32)
+                let random: u32 = rng.gen();
+                random % (bitmask(10) as u32)
             }
         };
 
