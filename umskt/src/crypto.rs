@@ -79,30 +79,42 @@ impl EllipticCurve {
         })
     }
 
-    fn mod_inverse(a: &BigInt, p: &BigInt) -> BigInt {
-        let egcd = a.extended_gcd(p);
-        egcd.x.mod_floor(p)
+    fn mod_inverse(&self, a: &BigInt) -> BigInt {
+        let mut s = (BigInt::zero(), BigInt::one());
+        let mut r = (self.p.clone(), a.clone());
+
+        while !r.0.is_zero() {
+            let q = &r.1 / &r.0;
+            std::mem::swap(&mut r.0, &mut r.1);
+            r.0 -= &q * &r.1;
+            std::mem::swap(&mut s.0, &mut s.1);
+            s.0 -= &q * &s.1;
+        }
+
+        if r.1 >= BigInt::zero() {
+            s.1 % &self.p
+        } else {
+            -s.1 % &self.p
+        }
     }
 
-    fn double_point(&self, point: &Point) -> Point {
-        match point {
-            Point::Point { x, y } => {
-                if y.is_zero() {
-                    Point::Infinity
-                } else {
-                    let three = BigInt::from(3);
-                    let two = BigInt::from(2);
-
-                    let lambda = (three * x * x + &self.a) * Self::mod_inverse(&(two * y), &self.p);
-                    let lamba_sqr = (&lambda * &lambda).mod_floor(&self.p);
-                    let x3 = (&lamba_sqr - x - x).mod_floor(&self.p);
-                    let y3 = (&lambda * (x - &x3) - y).mod_floor(&self.p);
-
-                    Point::Point { x: x3, y: y3 }
-                }
-            }
-            Point::Infinity => Point::Infinity,
+    fn double_point(&self, point: &ProjectivePoint) -> ProjectivePoint {
+        if point.y.is_zero() {
+            return ProjectivePoint::infinity();
         }
+
+        let three = BigInt::from(3);
+        let two = BigInt::from(2);
+
+        let t = (&point.x * &point.x * &three + &self.a * &point.z * &point.z).mod_floor(&self.p);
+        let u = (&point.y * &point.z * &two).mod_floor(&self.p);
+        let v = (&u * &point.x * &point.y * &two).mod_floor(&self.p);
+        let w = (&t * &t - &v * &two).mod_floor(&self.p);
+        let x = (&u * &w).mod_floor(&self.p);
+        let y = (&t * (&v - &w) - &u * &u * &point.y * &point.y * &two).mod_floor(&self.p);
+        let z = (&u * &u * &u).mod_floor(&self.p);
+
+        ProjectivePoint { x, y, z }
     }
 
     /// Adds two points on the curve together.
@@ -113,47 +125,106 @@ impl EllipticCurve {
     ///
     /// If both points are the point at infinity, it returns the point at infinity.
     pub(crate) fn add_points(&self, point1: &Point, point2: &Point) -> Point {
-        match (point1, point2) {
-            (Point::Point { x: x1, y: y1 }, Point::Point { x: x2, y: y2 }) => {
-                if point1 == point2 {
-                    self.double_point(point1)
-                } else {
-                    let lambda = (y2 - y1) * Self::mod_inverse(&(x2 - x1), &self.p);
-                    let x3 = ((&lambda * &lambda) - x1 - x2).mod_floor(&self.p);
-                    let y3: BigInt = ((&lambda * (x1 - &x3)) - y1).mod_floor(&self.p);
+        let point1: ProjectivePoint = point1.into();
+        let point2: ProjectivePoint = point2.into();
+        self.projective_to_affine(self.add_points_proj(&point1, &point2))
+    }
 
-                    Point::Point { x: x3, y: y3 }
-                }
-            }
-            (Point::Point { x, y }, Point::Infinity) | (Point::Infinity, Point::Point { x, y }) => {
-                Point::Point {
-                    x: x.clone(),
-                    y: y.clone(),
-                }
-            }
-            (Point::Infinity, Point::Infinity) => Point::Infinity,
+    fn add_points_proj(
+        &self,
+        point1: &ProjectivePoint,
+        point2: &ProjectivePoint,
+    ) -> ProjectivePoint {
+        if point1.z.is_zero() {
+            return point2.clone();
+        } else if point2.z.is_zero() {
+            return point1.clone();
         }
+
+        let t0 = (&point1.y * &point2.z).mod_floor(&self.p);
+        let t1 = (&point2.y * &point1.z).mod_floor(&self.p);
+        let u0 = (&point1.x * &point2.z).mod_floor(&self.p);
+        let u1 = (&point2.x * &point1.z).mod_floor(&self.p);
+        if u0 == u1 {
+            if t0 == t1 {
+                return self.double_point(point1);
+            } else {
+                return ProjectivePoint::infinity();
+            }
+        }
+
+        let t = (&t0 - &t1).mod_floor(&self.p);
+        let u = (&u0 - &u1).mod_floor(&self.p);
+        let u2 = (&u * &u).mod_floor(&self.p);
+        let v = (&point1.z * &point2.z).mod_floor(&self.p);
+        let w = (&t * &t * &v - &u2 * (&u0 + &u1)).mod_floor(&self.p);
+        let u3 = (&u * &u2).mod_floor(&self.p);
+        let x = (&u * &w).mod_floor(&self.p);
+        let y = (&t * (&u0 * &u2 - &w) - &t0 * &u3).mod_floor(&self.p);
+        let z = (&u3 * &v).mod_floor(&self.p);
+
+        ProjectivePoint { x, y, z }
+    }
+
+    fn projective_to_affine(&self, point: ProjectivePoint) -> Point {
+        if point.z.is_zero() {
+            return Point::Infinity;
+        }
+
+        let z_inv = self.mod_inverse(&point.z);
+        let x = (&point.x * &z_inv).mod_floor(&self.p);
+        let y = (&point.y * &z_inv).mod_floor(&self.p);
+
+        Point::Point { x, y }
     }
 
     /// Multiplies a point by a scalar.
     ///
     /// Uses the double-and-add algorithm.
-    pub(crate) fn multiply_point(&self, s: &BigInt, point: &Point) -> Point {
-        let mut res = Point::Infinity;
-        let mut temp = point.clone();
+    pub fn multiply_point(&self, n: &BigInt, point: &Point) -> Point {
+        let mut result = ProjectivePoint::infinity();
+        let mut temp: ProjectivePoint = point.into();
 
-        let mut s = s.clone();
-
-        while s > BigInt::zero() {
-            if (&s % BigInt::from(2)) == BigInt::one() {
-                res = self.add_points(&res, &temp);
+        let mut n = n.clone();
+        while n > BigInt::zero() {
+            if (&n % BigInt::from(2)) == BigInt::one() {
+                result = self.add_points_proj(&result, &temp);
             }
             temp = self.double_point(&temp);
-
-            s >>= 1;
+            n >>= 1;
         }
 
-        res
+        self.projective_to_affine(result)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ProjectivePoint {
+    x: BigInt,
+    y: BigInt,
+    z: BigInt,
+}
+
+impl ProjectivePoint {
+    pub fn infinity() -> Self {
+        ProjectivePoint {
+            x: Zero::zero(),
+            y: One::one(),
+            z: Zero::zero(),
+        }
+    }
+}
+
+impl From<&Point> for ProjectivePoint {
+    fn from(point: &Point) -> Self {
+        match point {
+            Point::Infinity => Self::infinity(),
+            Point::Point { x, y } => ProjectivePoint {
+                x: x.clone(),
+                y: y.clone(),
+                z: One::one(),
+            },
+        }
     }
 }
 
