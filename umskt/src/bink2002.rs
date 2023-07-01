@@ -172,12 +172,9 @@ impl ProductKey {
 
             s = &s + &seed;
 
-            match mod_sqrt(&s, gen_order) {
-                Some(res) => s = res,
-                None => {
-                    continue;
-                }
-            }
+            let Some(mut s) = mod_sqrt(&s, gen_order) else {
+                continue;
+            };
 
             s = (s - e).mod_floor(gen_order);
 
@@ -333,6 +330,8 @@ impl Display for ProductKey {
 
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigInt;
+    use num_traits::Num;
     use serde_json::from_reader;
     use std::{fs::File, io::BufReader};
 
@@ -358,6 +357,13 @@ mod tests {
         let gy = bink["g"]["y"].as_str().unwrap();
         let kx = bink["pub"]["x"].as_str().unwrap();
         let ky = bink["pub"]["y"].as_str().unwrap();
+
+        let p = BigInt::from_str_radix(p, 10).unwrap();
+        let a = BigInt::from_str_radix(a, 10).unwrap();
+        let gx = BigInt::from_str_radix(gx, 10).unwrap();
+        let gy = BigInt::from_str_radix(gy, 10).unwrap();
+        let kx = BigInt::from_str_radix(kx, 10).unwrap();
+        let ky = BigInt::from_str_radix(ky, 10).unwrap();
 
         let curve = EllipticCurve::new(p, a, gx, gy, kx, ky).unwrap();
 

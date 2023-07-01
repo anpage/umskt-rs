@@ -4,6 +4,8 @@ mod keys;
 use anyhow::{bail, Result};
 use clap::Parser;
 use keys::Bink;
+use num_bigint::BigInt;
+use num_traits::Num;
 use umskt::{
     bink1998, bink2002, confid,
     crypto::{EllipticCurve, PrivateKey},
@@ -57,10 +59,12 @@ fn generate(args: &GenerateArgs) -> Result<()> {
 
     // gen_order is the order of the generator G, a value we have to reverse -> Schoof's Algorithm.
     let gen_order = &bink.n;
+    let gen_order = BigInt::from_str_radix(gen_order, 10).unwrap();
 
     // We cannot produce a valid key without knowing the private key k. The reason for this is that
     // we need the result of the function K(x; y) = kG(x; y).
     let private_key = &bink.private;
+    let private_key = BigInt::from_str_radix(private_key, 10).unwrap();
 
     let curve = initialize_curve(bink, &bink_id)?;
     let private_key = PrivateKey::new(gen_order, private_key)?;
@@ -108,6 +112,13 @@ fn initialize_curve(bink: &Bink, bink_id: &str) -> Result<EllipticCurve> {
     let ky = &bink.public.y;
 
     log::info!("Elliptic curve parameters for BINK ID {bink_id}:\n{bink}");
+
+    let p = BigInt::from_str_radix(p, 10).unwrap();
+    let a = BigInt::from_str_radix(a, 10).unwrap();
+    let gx = BigInt::from_str_radix(gx, 10).unwrap();
+    let gy = BigInt::from_str_radix(gy, 10).unwrap();
+    let kx = BigInt::from_str_radix(kx, 10).unwrap();
+    let ky = BigInt::from_str_radix(ky, 10).unwrap();
 
     EllipticCurve::new(p, a, gx, gy, kx, ky)
 }

@@ -2,7 +2,7 @@
 use anyhow::Result;
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_traits::{Num, One, Zero};
+use num_traits::{One, Zero};
 
 /// Represents a point (possibly) on an elliptic curve.
 ///
@@ -34,9 +34,7 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
-    pub fn new(gen_order: &str, private_key: &str) -> Result<Self> {
-        let gen_order = BigInt::from_str_radix(gen_order, 10)?;
-        let private_key = BigInt::from_str_radix(private_key, 10)?;
+    pub fn new(gen_order: BigInt, private_key: BigInt) -> Result<Self> {
         Ok(Self {
             gen_order,
             private_key,
@@ -47,20 +45,13 @@ impl PrivateKey {
 impl EllipticCurve {
     /// Creates a new elliptic curve from the given parameters. `b` is not necessary.
     pub fn new(
-        p: &str,
-        a: &str,
-        generator_x: &str,
-        generator_y: &str,
-        public_key_x: &str,
-        public_key_y: &str,
+        p: BigInt,
+        a: BigInt,
+        generator_x: BigInt,
+        generator_y: BigInt,
+        public_key_x: BigInt,
+        public_key_y: BigInt,
     ) -> Result<Self> {
-        let p = BigInt::from_str_radix(p, 10)?;
-        let a = BigInt::from_str_radix(a, 10)?;
-        let generator_x = BigInt::from_str_radix(generator_x, 10)?;
-        let generator_y = BigInt::from_str_radix(generator_y, 10)?;
-        let public_key_x = BigInt::from_str_radix(public_key_x, 10)?;
-        let public_key_y = BigInt::from_str_radix(public_key_y, 10)?;
-
         let gen_point = Point::Point {
             x: generator_x,
             y: generator_y,

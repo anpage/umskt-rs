@@ -340,6 +340,8 @@ dependencies = [
  "anyhow",
  "clap",
  "log",
+ "num-bigint",
+ "num-traits",
  "serde",
  "serde_json",
  "simple_logger",
