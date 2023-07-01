@@ -1,11 +1,29 @@
-pub(crate) fn bitmask(n: u64) -> u64 {
-    (1 << n) - 1
+#![macro_use]
+
+use std::ops::{BitAnd, Shl, Shr};
+
+use num_traits::Num;
+
+#[inline(always)]
+pub(crate) fn bitmask<N>(n: N) -> N
+where
+    N: Num + Shl<Output = N>,
+{
+    (N::one() << n) - N::one()
 }
 
-pub(crate) fn next_sn_bits(field: u64, n: u32, offset: u32) -> u64 {
-    (field >> offset) & ((1u64 << n) - 1)
+#[inline(always)]
+pub(crate) fn extract_bits<N>(field: N, n: N, offset: N) -> N
+where
+    N: Num + BitAnd<Output = N> + Shr<Output = N> + Shl<Output = N>,
+{
+    (field >> offset) & bitmask(n)
 }
 
-pub(crate) fn by_dword(n: &[u8]) -> u32 {
-    (n[0] as u32) | (n[1] as u32) << 8 | (n[2] as u32) << 16 | (n[3] as u32) << 24
+#[inline(always)]
+pub(crate) fn extract_ls_bits<N>(field: N, n: N) -> N
+where
+    N: Num + BitAnd<Output = N> + Shl<Output = N>,
+{
+    field & bitmask(n)
 }

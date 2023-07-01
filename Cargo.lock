@@ -565,6 +565,7 @@ dependencies = [
  "anyhow",
  "bitreader",
  "elliptic-curve",
+ "log",
  "num-bigint",
  "num-integer",
  "num-traits",

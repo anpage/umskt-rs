@@ -1,27 +1,26 @@
 //! Structs to deal with older BINK (< `0x40`) product keys
-use std::{
-    cmp::Ordering,
-    fmt::{Display, Formatter},
-};
+use std::fmt::{Display, Formatter};
 
 use anyhow::{bail, Result};
 use bitreader::BitReader;
 use num_bigint::{BigInt, BigUint, RandomBits};
 use num_integer::Integer;
 use num_traits::{FromPrimitive, ToPrimitive};
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use sha1::{Digest, Sha1};
 
 use crate::{
     crypto::{EllipticCurve, Point, PrivateKey},
     key::{base24_decode, base24_encode, strip_key},
-    math::bitmask,
+    math::{bitmask, extract_bits},
 };
 
 const FIELD_BITS: u64 = 384;
 const FIELD_BYTES: usize = 48;
 const SHA_MSG_LENGTH: usize = 4 + 2 * FIELD_BYTES;
+const SEQUENCE_MAX: u32 = 999999;
 
+const SIGNATURE_LENGTH_BITS: u8 = 55;
 const HASH_LENGTH_BITS: u8 = 28;
 const SERIAL_LENGTH_BITS: u8 = 30;
 const UPGRADE_LENGTH_BITS: u8 = 1;
@@ -42,7 +41,7 @@ pub struct ProductKey {
 impl ProductKey {
     /// Generates a new product key for the given parameters.
     ///
-    /// The key is verified to be valid before being returned.
+    /// The generated key is guaranteed to be valid.
     pub fn new(
         curve: &EllipticCurve,
         private_key: &PrivateKey,
@@ -51,14 +50,7 @@ impl ProductKey {
         upgrade: Option<bool>,
     ) -> Result<Self> {
         // Generate random sequence if none supplied
-        let sequence = match sequence {
-            Some(serial) => serial,
-            None => {
-                let mut rng = rand::thread_rng();
-                let random: u32 = rng.gen();
-                random % 999999
-            }
-        };
+        let sequence = sequence.unwrap_or_else(|| thread_rng().gen::<u32>() % SEQUENCE_MAX);
 
         // Default to upgrade=false
         let upgrade = upgrade.unwrap_or(false);
@@ -76,14 +68,11 @@ impl ProductKey {
             upgrade,
         )?;
 
-        // Make sure the key is valid
-        product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
-
         // Ship it
         Ok(product_key)
     }
 
-    /// Validates an existing product key string and tried to create a new `ProductKey` from it.
+    /// Validates an existing product key string and tries to create a new `ProductKey` from it.
     ///
     /// # Arguments
     ///
@@ -111,61 +100,57 @@ impl ProductKey {
         let serial = channel_id * 1_000_000 + sequence;
         let data = serial << 1 | upgrade as u32;
 
-        let mut rng = rand::thread_rng();
+        let product_key: ProductKey = loop {
+            let seed: BigUint = thread_rng().sample(RandomBits::new(FIELD_BITS));
+            let seed: BigInt = seed.into();
 
-        let product_key = loop {
-            let c: BigUint = rng.sample(RandomBits::new(FIELD_BITS));
-            let c: BigInt = c.into();
+            let hash = {
+                let r = e_curve.multiply_point(&seed, base_point);
 
-            let r = e_curve.multiply_point(&c, base_point);
+                let Point::Point{x, y} = r else {
+                    bail!("Point at infinity! Are the elliptic curve parameters correct?")
+                };
 
-            let (x, y) = match r {
-                Point::Point { x, y } => (x, y),
-                Point::Infinity => bail!("Point at infinity!"),
+                let x_bin = x.to_bytes_le().1;
+                if x_bin.len() > FIELD_BYTES {
+                    log::info!("x is too big somehow, retrying...");
+                    continue;
+                }
+
+                let y_bin = y.to_bytes_le().1;
+                if y_bin.len() > FIELD_BYTES {
+                    log::info!("y is too big somehow, retrying...");
+                    continue;
+                }
+
+                let mut msg_buffer = [0; SHA_MSG_LENGTH];
+                msg_buffer[0..4].copy_from_slice(&data.to_le_bytes());
+                msg_buffer[4..4 + x_bin.len()].copy_from_slice(&x_bin);
+                msg_buffer[4 + FIELD_BYTES..4 + FIELD_BYTES + y_bin.len()].copy_from_slice(&y_bin);
+
+                let msg_digest = {
+                    let mut hasher = Sha1::new();
+                    hasher.update(msg_buffer);
+                    hasher.finalize()
+                };
+
+                extract_bits(
+                    u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()),
+                    28,
+                    4,
+                )
             };
-
-            let mut msg_buffer: [u8; SHA_MSG_LENGTH] = [0; SHA_MSG_LENGTH];
-
-            let x_bin = x.to_bytes_le().1;
-            let x_bin = match x_bin.len().cmp(&FIELD_BYTES) {
-                Ordering::Less => (0..FIELD_BYTES - x_bin.len())
-                    .map(|_| 0)
-                    .chain(x_bin.into_iter())
-                    .collect(),
-                Ordering::Greater => continue,
-                Ordering::Equal => x_bin,
-            };
-            let y_bin = y.to_bytes_le().1;
-            let y_bin = match y_bin.len().cmp(&FIELD_BYTES) {
-                Ordering::Less => (0..FIELD_BYTES - y_bin.len())
-                    .map(|_| 0)
-                    .chain(y_bin.into_iter())
-                    .collect(),
-                Ordering::Greater => continue,
-                Ordering::Equal => y_bin,
-            };
-
-            msg_buffer[0..4].copy_from_slice(&data.to_le_bytes());
-            msg_buffer[4..4 + FIELD_BYTES].copy_from_slice(&x_bin);
-            msg_buffer[4 + FIELD_BYTES..4 + FIELD_BYTES * 2].copy_from_slice(&y_bin);
-
-            let msg_digest = {
-                let mut hasher = Sha1::new();
-                hasher.update(msg_buffer);
-                hasher.finalize()
-            };
-
-            let hash: u32 =
-                u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()) >> 4 & bitmask(28) as u32;
 
             let mut ek = private_key.clone();
             ek *= hash;
 
-            let s = (ek + c).mod_floor(gen_order);
+            let s = (ek + seed).mod_floor(gen_order);
 
-            let signature = s.to_u64().unwrap_or(0);
+            let Some(signature) = s.to_u64() else {
+                bail!("Signature is more than 64 bits! Are the elliptic curve parameters correct?")
+            };
 
-            if signature <= bitmask(55) {
+            if signature <= bitmask(SIGNATURE_LENGTH_BITS as u64) {
                 break Self {
                     upgrade,
                     channel_id,
@@ -185,46 +170,35 @@ impl ProductKey {
         base_point: &Point,
         public_key: &Point,
     ) -> Result<bool> {
-        let e = BigInt::from_u32(self.hash).unwrap();
-        let s = BigInt::from_u64(self.signature).unwrap();
-
-        let t = e_curve.multiply_point(&s, base_point);
-        let mut p = e_curve.multiply_point(&e, public_key);
-
-        p = e_curve.add_points(&p, &t);
-
-        let (x, y) = match p {
-            Point::Point { x, y } => (x, y),
-            Point::Infinity => bail!("Point at infinity!"),
+        let p = {
+            let e = BigInt::from_u32(self.hash).unwrap();
+            let s = BigInt::from_u64(self.signature).unwrap();
+            let t = e_curve.multiply_point(&s, base_point);
+            let p = e_curve.multiply_point(&e, public_key);
+            e_curve.add_points(&p, &t)
         };
 
-        let mut msg_buffer: [u8; SHA_MSG_LENGTH] = [0; SHA_MSG_LENGTH];
+        let Point::Point{x, y} = p else {
+            bail!("Point at infinity! Are the elliptic curve parameters correct?")
+        };
 
         let x_bin = x.to_bytes_le().1;
-        let x_bin = if x_bin.len() < FIELD_BYTES {
-            (0..FIELD_BYTES - x_bin.len())
-                .map(|_| 0)
-                .chain(x_bin.into_iter())
-                .collect()
-        } else {
-            x_bin
-        };
+        if x_bin.len() > FIELD_BYTES {
+            bail!("x is too big somehow! Are the elliptic curve parameters correct?");
+        }
+
         let y_bin = y.to_bytes_le().1;
-        let y_bin = if y_bin.len() < FIELD_BYTES {
-            (0..FIELD_BYTES - y_bin.len())
-                .map(|_| 0)
-                .chain(y_bin.into_iter())
-                .collect()
-        } else {
-            y_bin
-        };
+        if y_bin.len() > FIELD_BYTES {
+            bail!("y is too big somehow! Are the elliptic curve parameters correct?");
+        }
 
         let serial = self.channel_id * 1_000_000 + self.sequence;
         let data = serial << 1 | self.upgrade as u32;
 
+        let mut msg_buffer: [u8; SHA_MSG_LENGTH] = [0; SHA_MSG_LENGTH];
         msg_buffer[0..4].copy_from_slice(&data.to_le_bytes());
-        msg_buffer[4..4 + FIELD_BYTES].copy_from_slice(&x_bin);
-        msg_buffer[4 + FIELD_BYTES..4 + FIELD_BYTES * 2].copy_from_slice(&y_bin);
+        msg_buffer[4..4 + x_bin.len()].copy_from_slice(&x_bin);
+        msg_buffer[4 + FIELD_BYTES..4 + FIELD_BYTES + y_bin.len()].copy_from_slice(&y_bin);
 
         let msg_digest = {
             let mut hasher = Sha1::new();
@@ -232,14 +206,18 @@ impl ProductKey {
             hasher.finalize()
         };
 
-        let hash: u32 =
-            u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()) >> 4 & bitmask(28) as u32;
+        let hash: u32 = extract_bits(
+            u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()),
+            28,
+            4,
+        );
 
         Ok(hash == self.hash)
     }
 
     fn from_packed(packed_key: &[u8]) -> Result<Self> {
         let mut reader = BitReader::new(packed_key);
+
         // The signature length isn't known, but everything else is, so we can calculate it
         let signature_length_bits = (packed_key.len() * 8) as u8 - EVERYTHING_ELSE;
 

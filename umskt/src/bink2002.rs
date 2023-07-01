@@ -1,26 +1,24 @@
 //! Structs to deal with newer BINK (>= `0x40`) product keys
-use std::{
-    cmp::Ordering,
-    fmt::{Display, Formatter},
-};
+use std::fmt::{Display, Formatter};
 
 use anyhow::{bail, Result};
 use bitreader::BitReader;
 use num_bigint::{BigInt, BigUint, RandomBits};
 use num_integer::Integer;
 use num_traits::ToPrimitive;
-use rand::Rng;
+use rand::{thread_rng, Rng};
 use sha1::{Digest, Sha1};
 
 use crate::{
     crypto::{mod_sqrt, EllipticCurve, Point, PrivateKey},
     key::{base24_decode, base24_encode, strip_key},
-    math::{bitmask, by_dword, next_sn_bits},
+    math::{bitmask, extract_bits, extract_ls_bits},
 };
 
 const FIELD_BITS: u64 = 512;
 const FIELD_BYTES: usize = 64;
 const SHA_MSG_LENGTH: usize = 3 + 2 * FIELD_BYTES;
+const AUTH_INFO_MAX: u32 = 1023;
 
 const SIGNATURE_LENGTH_BITS: u8 = 62;
 const HASH_LENGTH_BITS: u8 = 31;
@@ -44,7 +42,7 @@ pub struct ProductKey {
 impl ProductKey {
     /// Generates a new product key for the given parameters.
     ///
-    /// The key is verified to be valid before being returned.
+    /// The generated key is guaranteed to be valid.
     pub fn new(
         curve: &EllipticCurve,
         private_key: &PrivateKey,
@@ -53,14 +51,7 @@ impl ProductKey {
         upgrade: Option<bool>,
     ) -> Result<Self> {
         // Generate random auth info if none supplied
-        let auth_info = match auth_info {
-            Some(auth_info) => auth_info,
-            None => {
-                let mut rng = rand::thread_rng();
-                let random: u32 = rng.gen();
-                random % (bitmask(10) as u32)
-            }
-        };
+        let auth_info = auth_info.unwrap_or_else(|| thread_rng().gen::<u32>() % AUTH_INFO_MAX);
 
         // Default to upgrade=false
         let upgrade = upgrade.unwrap_or(false);
@@ -76,14 +67,11 @@ impl ProductKey {
             upgrade,
         )?;
 
-        // Make sure the key is valid
-        product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
-
         // Ship it
         Ok(product_key)
     }
 
-    /// Validates an existing product key string and tried to create a new `ProductKey` from it.
+    /// Validates an existing product key string and tries to create a new `ProductKey` from it.
     ///
     /// # Arguments
     ///
@@ -113,47 +101,49 @@ impl ProductKey {
     ) -> Result<Self> {
         let data = channel_id << 1 | upgrade as u32;
 
-        let mut rng = rand::thread_rng();
-
-        let mut no_square = false;
         let key = loop {
-            let c: BigUint = rng.sample(RandomBits::new(FIELD_BITS));
-            let mut c: BigInt = c.into();
+            let seed: BigUint = thread_rng().sample(RandomBits::new(FIELD_BITS));
+            let mut seed: BigInt = seed.into();
 
-            let r = e_curve.multiply_point(&c, base_point);
+            let hash = {
+                let r = e_curve.multiply_point(&seed, base_point);
 
-            let (x, y) = match r {
-                Point::Point { x, y } => (x, y),
-                Point::Infinity => bail!("Point at infinity!"),
+                let Point::Point{x, y} = r else {
+                    bail!("Point at infinity! Are the elliptic curve parameters correct?")
+                };
+
+                let x_bin = x.to_bytes_le().1;
+                if x_bin.len() > FIELD_BYTES {
+                    log::info!("x is too big somehow, retrying...");
+                    continue;
+                }
+
+                let y_bin = y.to_bytes_le().1;
+                if y_bin.len() > FIELD_BYTES {
+                    log::info!("y is too big somehow, retrying...");
+                    continue;
+                }
+
+                let mut msg_buffer = [0; SHA_MSG_LENGTH];
+                msg_buffer[0x00] = 0x79;
+                msg_buffer[1..3].copy_from_slice(&data.to_le_bytes()[0..2]);
+                msg_buffer[3..3 + x_bin.len()].copy_from_slice(&x_bin);
+                msg_buffer[3 + FIELD_BYTES..3 + FIELD_BYTES + y_bin.len()].copy_from_slice(&y_bin);
+
+                let msg_digest = {
+                    let mut hasher = Sha1::new();
+                    hasher.update(msg_buffer);
+                    hasher.finalize()
+                };
+
+                extract_ls_bits(u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()), 31)
             };
 
-            let mut msg_buffer: [u8; SHA_MSG_LENGTH] = [0; SHA_MSG_LENGTH];
-
-            let x_bin = x.to_bytes_le().1;
-            let x_bin = match x_bin.len().cmp(&FIELD_BYTES) {
-                Ordering::Less => (0..FIELD_BYTES - x_bin.len())
-                    .map(|_| 0)
-                    .chain(x_bin.into_iter())
-                    .collect(),
-                Ordering::Greater => continue,
-                Ordering::Equal => x_bin,
-            };
-            let y_bin = y.to_bytes_le().1;
-            let y_bin = match y_bin.len().cmp(&FIELD_BYTES) {
-                Ordering::Less => (0..FIELD_BYTES - y_bin.len())
-                    .map(|_| 0)
-                    .chain(y_bin.into_iter())
-                    .collect(),
-                Ordering::Greater => continue,
-                Ordering::Equal => y_bin,
-            };
-
-            msg_buffer[0x00] = 0x79;
-            msg_buffer[0x01] = (data & 0x00FF) as u8;
-            msg_buffer[0x02] = ((data & 0xFF00) >> 8) as u8;
-
-            msg_buffer[3..3 + FIELD_BYTES].copy_from_slice(&x_bin);
-            msg_buffer[3 + FIELD_BYTES..3 + FIELD_BYTES * 2].copy_from_slice(&y_bin);
+            let mut msg_buffer = [0; 11];
+            msg_buffer[0] = 0x5D;
+            msg_buffer[1..3].copy_from_slice(&data.to_le_bytes()[0..2]);
+            msg_buffer[3..7].copy_from_slice(&hash.to_le_bytes());
+            msg_buffer[7..9].copy_from_slice(&auth_info.to_le_bytes()[0..2]);
 
             let msg_digest = {
                 let mut hasher = Sha1::new();
@@ -161,28 +151,14 @@ impl ProductKey {
                 hasher.finalize()
             };
 
-            let hash: u32 = by_dword(&msg_digest[0..4]) & bitmask(31) as u32;
+            dbg!(msg_digest);
 
-            msg_buffer[0x00] = 0x5D;
-            msg_buffer[0x01] = (data & 0x00FF) as u8;
-            msg_buffer[0x02] = ((data & 0xFF00) >> 8) as u8;
-            msg_buffer[0x03] = (hash & 0x000000FF) as u8;
-            msg_buffer[0x04] = ((hash & 0x0000FF00) >> 8) as u8;
-            msg_buffer[0x05] = ((hash & 0x00FF0000) >> 16) as u8;
-            msg_buffer[0x06] = ((hash & 0xFF000000) >> 24) as u8;
-            msg_buffer[0x07] = (auth_info & 0x00FF) as u8;
-            msg_buffer[0x08] = ((auth_info & 0xFF00) >> 8) as u8;
-            msg_buffer[0x09] = 0x00;
-            msg_buffer[0x0A] = 0x00;
-
-            let msg_digest = {
-                let mut hasher = Sha1::new();
-                hasher.update(&msg_buffer[..=0x0A]);
-                hasher.finalize()
-            };
-
-            let i_signature = next_sn_bits(by_dword(&msg_digest[4..8]) as u64, 30, 2) << 32
-                | by_dword(&msg_digest[0..4]) as u64;
+            let i_signature = extract_bits(
+                u32::from_le_bytes(msg_digest[4..8].try_into().unwrap()) as u64,
+                30,
+                2,
+            ) << 32
+                | u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()) as u64;
 
             let mut e = BigInt::from(i_signature);
 
@@ -192,14 +168,14 @@ impl ProductKey {
 
             s = (&s * &s).mod_floor(gen_order);
 
-            c <<= 2;
+            seed <<= 2;
 
-            s = &s + &c;
+            s = &s + &seed;
 
             match mod_sqrt(&s, gen_order) {
                 Some(res) => s = res,
                 None => {
-                    no_square = true;
+                    continue;
                 }
             }
 
@@ -211,21 +187,19 @@ impl ProductKey {
 
             s >>= 1;
 
-            let signature = s.to_u64().unwrap_or(0);
-
-            let product_key = Self {
-                upgrade,
-                channel_id,
-                hash,
-                signature,
-                auth_info,
+            let Some(signature) = s.to_u64() else {
+                bail!("Signature is more than 64 bits! Are the elliptic curve parameters correct?")
             };
 
-            if signature <= bitmask(62) && !no_square {
-                break product_key;
+            if signature <= bitmask(SIGNATURE_LENGTH_BITS as u64) {
+                break Self {
+                    upgrade,
+                    channel_id,
+                    hash,
+                    signature,
+                    auth_info,
+                };
             }
-
-            no_square = false;
         };
 
         Ok(key)
@@ -239,68 +213,11 @@ impl ProductKey {
     ) -> Result<bool> {
         let data = self.channel_id << 1 | self.upgrade as u32;
 
-        let mut msg_buffer: [u8; SHA_MSG_LENGTH] = [0; SHA_MSG_LENGTH];
-
-        msg_buffer[0x00] = 0x5D;
-        msg_buffer[0x01] = (data & 0x00FF) as u8;
-        msg_buffer[0x02] = ((data & 0xFF00) >> 8) as u8;
-        msg_buffer[0x03] = (self.hash & 0x000000FF) as u8;
-        msg_buffer[0x04] = ((self.hash & 0x0000FF00) >> 8) as u8;
-        msg_buffer[0x05] = ((self.hash & 0x00FF0000) >> 16) as u8;
-        msg_buffer[0x06] = ((self.hash & 0xFF000000) >> 24) as u8;
-        msg_buffer[0x07] = (self.auth_info & 0x00FF) as u8;
-        msg_buffer[0x08] = ((self.auth_info & 0xFF00) >> 8) as u8;
-        msg_buffer[0x09] = 0x00;
-        msg_buffer[0x0A] = 0x00;
-
-        let msg_digest = {
-            let mut hasher = Sha1::new();
-            hasher.update(&msg_buffer[..=0x0A]);
-            hasher.finalize()
-        };
-
-        let i_signature = next_sn_bits(by_dword(&msg_digest[4..8]) as u64, 30, 2) << 32
-            | by_dword(&msg_digest[0..4]) as u64;
-
-        let e = BigInt::from(i_signature);
-        let s = BigInt::from(self.signature);
-
-        let t = e_curve.multiply_point(&s, base_point);
-        let mut p = e_curve.multiply_point(&e, public_key);
-
-        p = e_curve.add_points(&t, &p);
-        p = e_curve.multiply_point(&s, &p);
-
-        let (x, y) = match p {
-            Point::Point { x, y } => (x, y),
-            Point::Infinity => bail!("Point at infinity!"),
-        };
-
-        let x_bin = x.to_bytes_le().1;
-        let x_bin = if x_bin.len() < FIELD_BYTES {
-            (0..FIELD_BYTES - x_bin.len())
-                .map(|_| 0)
-                .chain(x_bin.into_iter())
-                .collect()
-        } else {
-            x_bin
-        };
-        let y_bin = y.to_bytes_le().1;
-        let y_bin = if y_bin.len() < FIELD_BYTES {
-            (0..FIELD_BYTES - y_bin.len())
-                .map(|_| 0)
-                .chain(y_bin.into_iter())
-                .collect()
-        } else {
-            y_bin
-        };
-
-        msg_buffer[0x00] = 0x79;
-        msg_buffer[0x01] = (data & 0x00FF) as u8;
-        msg_buffer[0x02] = ((data & 0xFF00) >> 8) as u8;
-
-        msg_buffer[3..3 + FIELD_BYTES].copy_from_slice(&x_bin);
-        msg_buffer[3 + FIELD_BYTES..3 + FIELD_BYTES * 2].copy_from_slice(&y_bin);
+        let mut msg_buffer = [0; 11];
+        msg_buffer[0] = 0x5D;
+        msg_buffer[1..3].copy_from_slice(&data.to_le_bytes()[0..2]);
+        msg_buffer[3..7].copy_from_slice(&self.hash.to_le_bytes());
+        msg_buffer[7..9].copy_from_slice(&self.auth_info.to_le_bytes()[0..2]);
 
         let msg_digest = {
             let mut hasher = Sha1::new();
@@ -308,7 +225,49 @@ impl ProductKey {
             hasher.finalize()
         };
 
-        let hash: u32 = by_dword(&msg_digest[0..4]) & bitmask(31) as u32;
+        let i_signature = extract_bits(
+            u32::from_le_bytes(msg_digest[4..8].try_into().unwrap()) as u64,
+            30,
+            2,
+        ) << 32
+            | u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()) as u64;
+
+        let p = {
+            let e = BigInt::from(i_signature);
+            let s = BigInt::from(self.signature);
+            let t = e_curve.multiply_point(&s, base_point);
+            let mut p = e_curve.multiply_point(&e, public_key);
+            p = e_curve.add_points(&t, &p);
+            e_curve.multiply_point(&s, &p)
+        };
+
+        let Point::Point{x, y} = p else {
+            bail!("Point at infinity! Are the elliptic curve parameters correct?")
+        };
+
+        let x_bin = x.to_bytes_le().1;
+        if x_bin.len() > FIELD_BYTES {
+            bail!("x is too big somehow! Are the elliptic curve parameters correct?");
+        }
+
+        let y_bin = y.to_bytes_le().1;
+        if y_bin.len() > FIELD_BYTES {
+            bail!("y is too big somehow! Are the elliptic curve parameters correct?");
+        }
+
+        let mut msg_buffer = [0; SHA_MSG_LENGTH];
+        msg_buffer[0] = 0x79;
+        msg_buffer[1..3].copy_from_slice(&data.to_le_bytes()[0..2]);
+        msg_buffer[3..3 + x_bin.len()].copy_from_slice(&x_bin);
+        msg_buffer[3 + FIELD_BYTES..3 + FIELD_BYTES + y_bin.len()].copy_from_slice(&y_bin);
+
+        let msg_digest = {
+            let mut hasher = Sha1::new();
+            hasher.update(msg_buffer);
+            hasher.finalize()
+        };
+
+        let hash = extract_ls_bits(u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()), 31);
 
         Ok(hash == self.hash)
     }
