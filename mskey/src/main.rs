@@ -146,7 +146,7 @@ fn bink1998_generate(
 ) -> Result<()> {
     for _ in 0..count {
         let product_key = bink1998::ProductKey::new(curve, private_key, channel_id, serial, None)?;
-        log::info!("{:?}", product_key);
+        log::info!("{:#?}", product_key);
         println!("{product_key}");
     }
     Ok(())
@@ -160,7 +160,7 @@ fn bink2002_generate(
 ) -> Result<()> {
     for _ in 0..count {
         let product_key = bink2002::ProductKey::new(curve, private_key, channel_id, None, None)?;
-        log::info!("{:?}", product_key);
+        log::info!("{:#?}", product_key);
         println!("{product_key}");
     }
     Ok(())
@@ -168,7 +168,7 @@ fn bink2002_generate(
 
 fn bink1998_validate(curve: &EllipticCurve, key: &str) -> Result<()> {
     let product_key = bink1998::ProductKey::from_key(curve, key)?;
-    log::info!("{:?}", product_key);
+    log::info!("{:#?}", product_key);
     println!("{product_key}");
     println!("Key validated successfully!");
     Ok(())
@@ -176,7 +176,7 @@ fn bink1998_validate(curve: &EllipticCurve, key: &str) -> Result<()> {
 
 fn bink2002_validate(curve: &EllipticCurve, key: &str) -> Result<()> {
     let product_key = bink2002::ProductKey::from_key(curve, key)?;
-    log::info!("{:?}", product_key);
+    log::info!("{:#?}", product_key);
     println!("{product_key}");
     println!("Key validated successfully!");
     Ok(())
