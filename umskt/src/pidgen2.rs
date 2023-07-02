@@ -1,3 +1,13 @@
+//! Tools for working with older product keys
+//!
+//! These keys take the form:
+//! ```text
+//! XXX-XXXXXXX
+//! ```
+//! or:
+//! ```text
+//! XXXXX-OEM-XXXXXXX-XXXXX
+//! ```
 use std::fmt::Display;
 
 use rand::{thread_rng, Rng};
