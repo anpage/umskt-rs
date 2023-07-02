@@ -234,7 +234,7 @@ impl Display for OemID {
     }
 }
 
-/// Generates a product key for the retail version of 95.
+/// Generates a product key for the retail version of a product.
 ///
 /// Any of the parameters can be `None` to generate a random value.
 pub fn generate_retail(channel_id: Option<ChannelID>, serial: Option<Serial>) -> String {
@@ -243,7 +243,7 @@ pub fn generate_retail(channel_id: Option<ChannelID>, serial: Option<Serial>) ->
     format!("{channel_id}-{serial}")
 }
 
-/// Generates a product key for the OEM version of 95.
+/// Generates a product key for the OEM version of a product.
 ///
 /// Any of the parameters can be `None` to generate a random value.
 pub fn generate_oem(year: Option<Year>, day: Option<Day>, oem_id: Option<OemID>) -> String {
