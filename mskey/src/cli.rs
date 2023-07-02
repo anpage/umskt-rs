@@ -48,6 +48,10 @@ pub struct GenerateArgs {
     #[arg(short = 'n', long = "number", default_value = "1")]
     pub count: u64,
 
+    /// Serial number to use in the product ID (if applicable)
+    #[arg(short, long)]
+    pub serial: Option<u32>,
+
     /// Optional path to load a keys.json file
     #[arg(short, long = "keys")]
     pub keys_path: Option<String>,

@@ -70,8 +70,22 @@ fn generate(args: &GenerateArgs) -> Result<()> {
     let private_key = PrivateKey::new(gen_order, private_key)?;
 
     if u32::from_str_radix(&bink_id, 16)? < 0x40 {
-        bink1998_generate(&curve, &private_key, args.channel_id, args.count)?;
+        if let Some(serial) = args.serial {
+            if serial > 999999 {
+                bail!("Serial number must be 6 digits or fewer");
+            }
+        }
+        bink1998_generate(
+            &curve,
+            &private_key,
+            args.channel_id,
+            args.serial,
+            args.count,
+        )?;
     } else {
+        if args.serial.is_some() {
+            bail!("Serial numbers do not apply for BINK IDs >= 0x40");
+        }
         bink2002_generate(&curve, &private_key, args.channel_id, args.count)?;
     }
 
@@ -127,10 +141,11 @@ fn bink1998_generate(
     curve: &EllipticCurve,
     private_key: &PrivateKey,
     channel_id: u32,
+    serial: Option<u32>,
     count: u64,
 ) -> Result<()> {
     for _ in 0..count {
-        let product_key = bink1998::ProductKey::new(curve, private_key, channel_id, None, None)?;
+        let product_key = bink1998::ProductKey::new(curve, private_key, channel_id, serial, None)?;
         log::info!("{:?}", product_key);
         println!("{product_key}");
     }
