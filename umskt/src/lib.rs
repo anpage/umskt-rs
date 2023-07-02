@@ -8,9 +8,8 @@
 //!
 //! See `README.md` for more information.
 //!
-pub mod bink1998;
-pub mod bink2002;
 pub mod confid;
 pub mod crypto;
 mod key;
 mod math;
+pub mod pidgen3;

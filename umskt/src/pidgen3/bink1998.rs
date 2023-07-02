@@ -281,7 +281,7 @@ mod tests {
     use num_traits::Num;
     use serde_json::from_reader;
 
-    use crate::{bink1998, crypto::EllipticCurve};
+    use crate::{crypto::EllipticCurve, pidgen3::bink1998};
 
     #[test]
     fn verify_test() {

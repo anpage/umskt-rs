@@ -7,8 +7,10 @@ use keys::Bink;
 use num_bigint::BigInt;
 use num_traits::Num;
 use umskt::{
-    bink1998, bink2002, confid,
+    confid,
     crypto::{EllipticCurve, PrivateKey},
+    pidgen3::bink1998,
+    pidgen3::bink2002,
 };
 
 use crate::{cli::*, keys::load_keys};
