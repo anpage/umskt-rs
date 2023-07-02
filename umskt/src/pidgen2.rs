@@ -130,7 +130,7 @@ impl Year {
             5 => Self::Year00,
             6 => Self::Year01,
             7 => Self::Year02,
-            _ => panic!(),
+            _ => unreachable!(),
         }
     }
 }
