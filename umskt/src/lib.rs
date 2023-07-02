@@ -12,4 +12,5 @@ pub mod confid;
 pub mod crypto;
 mod key;
 mod math;
+pub mod pidgen2;
 pub mod pidgen3;
