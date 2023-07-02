@@ -7,8 +7,8 @@ use thiserror::Error;
 pub enum ChannelIDError {
     #[error("Channel ID must be 3 digits or fewer.")]
     OutOfRange,
-    #[error("Channel ID is blacklisted.")]
-    BlackListed,
+    #[error("Channel ID is Disallowed.")]
+    Disallowed,
 }
 
 /// A 3-digit channel ID
@@ -25,14 +25,14 @@ pub enum ChannelIDError {
 pub struct ChannelID(u16);
 
 impl ChannelID {
-    const CHANNEL_ID_BLACKLIST: [u16; 7] = [333, 444, 555, 666, 777, 888, 999];
+    const DISALLOWED_CHANNEL_IDS: [u16; 7] = [333, 444, 555, 666, 777, 888, 999];
 
     pub fn new(id: u16) -> Result<Self, ChannelIDError> {
         if id > 999 {
             return Err(ChannelIDError::OutOfRange);
         }
-        if Self::CHANNEL_ID_BLACKLIST.contains(&id) {
-            return Err(ChannelIDError::BlackListed);
+        if Self::DISALLOWED_CHANNEL_IDS.contains(&id) {
+            return Err(ChannelIDError::Disallowed);
         }
         Ok(Self(id))
     }
@@ -40,7 +40,7 @@ impl ChannelID {
     pub fn random() -> Self {
         let id = loop {
             let id = thread_rng().gen_range(0..999);
-            if !Self::CHANNEL_ID_BLACKLIST.contains(&id) {
+            if !Self::DISALLOWED_CHANNEL_IDS.contains(&id) {
                 break id;
             }
         };
@@ -65,6 +65,7 @@ pub enum SerialError {
 /// A 7-digit serial number
 ///
 /// The sum of the digits of the serial number must be divisible by 7.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Serial(u32);
 
 impl Serial {
@@ -159,6 +160,7 @@ pub enum DayError {
 /// A 3-digit day
 ///
 /// The day must be between 0 and 365 (exclusive).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Day(u16);
 
 impl Day {
@@ -191,6 +193,7 @@ pub enum OemIDError {
 /// A 5-digit OEM ID
 ///
 /// The sum of the digits of the OEM ID must be divisible by 7.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct OemID(u32);
 
 impl OemID {
@@ -254,6 +257,44 @@ pub fn generate_oem(year: Option<Year>, day: Option<Day>, oem_id: Option<OemID>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_channel_id() {
+        assert_eq!(ChannelID::new(0), Ok(ChannelID(0)));
+        assert_eq!(ChannelID::new(1), Ok(ChannelID(1)));
+        assert_eq!(ChannelID::new(123), Ok(ChannelID(123)));
+        assert_eq!(ChannelID::new(9999), Err(ChannelIDError::OutOfRange));
+        assert_eq!(ChannelID::new(777), Err(ChannelIDError::Disallowed));
+    }
+
+    #[test]
+    fn test_serial() {
+        assert_eq!(Serial::new(0), Ok(Serial(0)));
+        assert_eq!(Serial::new(7), Ok(Serial(7)));
+        assert_eq!(Serial::new(133), Ok(Serial(133)));
+        assert_eq!(Serial::new(1111111), Ok(Serial(1111111)));
+        assert_eq!(Serial::new(99999999), Err(SerialError::OutOfRange));
+        assert_eq!(Serial::new(33), Err(SerialError::Invalid));
+    }
+
+    #[test]
+    fn test_day() {
+        assert_eq!(Day::new(1), Ok(Day(1)));
+        assert_eq!(Day::new(123), Ok(Day(123)));
+        assert_eq!(Day::new(364), Ok(Day(364)));
+        assert_eq!(Day::new(0), Err(DayError::OutOfRange));
+        assert_eq!(Day::new(365), Err(DayError::OutOfRange));
+    }
+
+    #[test]
+    fn test_oem_id() {
+        assert_eq!(OemID::new(0), Ok(OemID(0)));
+        assert_eq!(OemID::new(7), Ok(OemID(7)));
+        assert_eq!(OemID::new(133), Ok(OemID(133)));
+        assert_eq!(OemID::new(59716), Ok(OemID(59716)));
+        assert_eq!(OemID::new(100000), Err(OemIDError::OutOfRange));
+        assert_eq!(OemID::new(12345), Err(OemIDError::Invalid));
+    }
 
     #[test]
     fn test_generate_retail() {
