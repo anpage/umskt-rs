@@ -151,8 +151,6 @@ impl ProductKey {
                 hasher.finalize()
             };
 
-            dbg!(msg_digest);
-
             let i_signature = extract_bits(
                 u32::from_le_bytes(msg_digest[4..8].try_into().unwrap()) as u64,
                 30,
