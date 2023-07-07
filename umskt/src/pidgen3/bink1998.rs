@@ -228,8 +228,9 @@ impl ProductKey {
         }
     }
 
-    fn from_packed(packed_key: &[u8]) -> Result<Self> {
-        let mut reader = BitReader::new(packed_key);
+    fn from_packed(packed_key: &BigUint) -> Result<Self> {
+        let packed_key = packed_key.to_bytes_be();
+        let mut reader = BitReader::new(&packed_key);
 
         // The signature length isn't known, but everything else is, so we can calculate it
         let signature_length_bits = (packed_key.len() * 8) as u8 - EVERYTHING_ELSE;
@@ -251,7 +252,7 @@ impl ProductKey {
         })
     }
 
-    fn pack(&self) -> Vec<u8> {
+    fn pack(&self) -> BigUint {
         let mut packed_key: u128 = 0;
 
         let serial = self.channel_id * 1_000_000 + self.sequence;
@@ -261,11 +262,7 @@ impl ProductKey {
         packed_key |= (serial as u128) << UPGRADE_LENGTH_BITS;
         packed_key |= self.upgrade as u128;
 
-        packed_key
-            .to_be_bytes()
-            .into_iter()
-            .skip_while(|&x| x == 0)
-            .collect()
+        BigUint::from_bytes_be(&packed_key.to_be_bytes())
     }
 }
 
