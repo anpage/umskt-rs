@@ -26,6 +26,12 @@ const SERIAL_LENGTH_BITS: u8 = 30;
 const UPGRADE_LENGTH_BITS: u8 = 1;
 const EVERYTHING_ELSE: u8 = HASH_LENGTH_BITS + SERIAL_LENGTH_BITS + UPGRADE_LENGTH_BITS;
 
+#[must_use]
+enum VerificationResult {
+    Valid,
+    Invalid,
+}
+
 /// A product key for a BINK ID less than `0x40`
 ///
 /// Every `ProductKey` contains a valid key for its given parameters.
@@ -84,7 +90,10 @@ impl ProductKey {
             bail!("Product key is in an incorrect format!")
         };
         let product_key = Self::from_packed(&packed_key)?;
-        product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
+        let verified = product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
+        if matches!(verified, VerificationResult::Invalid) {
+            bail!("Product key is invalid! Wrong BINK ID?")
+        }
         Ok(product_key)
     }
 
@@ -169,7 +178,7 @@ impl ProductKey {
         e_curve: &EllipticCurve,
         base_point: &Point,
         public_key: &Point,
-    ) -> Result<bool> {
+    ) -> Result<VerificationResult> {
         let p = {
             let e = BigInt::from_u32(self.hash).unwrap();
             let s = BigInt::from_u64(self.signature).unwrap();
@@ -212,7 +221,11 @@ impl ProductKey {
             4,
         );
 
-        Ok(hash == self.hash)
+        if hash == self.hash {
+            Ok(VerificationResult::Valid)
+        } else {
+            Ok(VerificationResult::Invalid)
+        }
     }
 
     fn from_packed(packed_key: &[u8]) -> Result<Self> {

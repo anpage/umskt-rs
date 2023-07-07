@@ -27,6 +27,12 @@ const UPGRADE_LENGTH_BITS: u8 = 1;
 const EVERYTHING_ELSE: u8 =
     SIGNATURE_LENGTH_BITS + HASH_LENGTH_BITS + CHANNEL_ID_LENGTH_BITS + UPGRADE_LENGTH_BITS;
 
+#[must_use]
+enum VerificationResult {
+    Valid,
+    Invalid,
+}
+
 /// A product key for a BINK ID `0x40` or higher
 ///
 /// Every `ProductKey` contains a valid key for its given parameters.
@@ -84,7 +90,7 @@ impl ProductKey {
         };
         let product_key = Self::from_packed(&packed_key)?;
         let verified = product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
-        if !verified {
+        if matches!(verified, VerificationResult::Invalid) {
             bail!("Product key is invalid! Wrong BINK ID?");
         }
         Ok(product_key)
@@ -205,7 +211,7 @@ impl ProductKey {
         e_curve: &EllipticCurve,
         base_point: &Point,
         public_key: &Point,
-    ) -> Result<bool> {
+    ) -> Result<VerificationResult> {
         let data = self.channel_id << 1 | self.upgrade as u32;
 
         let mut msg_buffer = [0; 11];
@@ -264,7 +270,11 @@ impl ProductKey {
 
         let hash = extract_ls_bits(u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()), 31);
 
-        Ok(hash == self.hash)
+        if hash == self.hash {
+            Ok(VerificationResult::Valid)
+        } else {
+            Ok(VerificationResult::Invalid)
+        }
     }
 
     fn from_packed(packed_key: &[u8]) -> Result<Self> {
