@@ -1,5 +1,4 @@
 //! Code that deals with elliptic curve cryptography
-use anyhow::Result;
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::{One, Zero};
@@ -34,11 +33,11 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
-    pub fn new(gen_order: BigInt, private_key: BigInt) -> Result<Self> {
-        Ok(Self {
+    pub fn new(gen_order: BigInt, private_key: BigInt) -> Self {
+        Self {
             gen_order,
             private_key,
-        })
+        }
     }
 }
 
@@ -51,7 +50,7 @@ impl EllipticCurve {
         generator_y: BigInt,
         public_key_x: BigInt,
         public_key_y: BigInt,
-    ) -> Result<Self> {
+    ) -> Self {
         let gen_point = Point::Point {
             x: generator_x,
             y: generator_y,
@@ -62,12 +61,12 @@ impl EllipticCurve {
             y: public_key_y,
         };
 
-        Ok(Self {
+        Self {
             a,
             p,
             gen_point,
             pub_point,
-        })
+        }
     }
 
     fn mod_inverse(&self, a: &BigInt) -> BigInt {

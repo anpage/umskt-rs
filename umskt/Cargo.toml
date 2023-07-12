@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.71"
 bitreader = "0.3.7"
 elliptic-curve = "0.13.5"
 num-bigint = { version = "0.4.3", features = ["rand"] }

@@ -1,7 +1,6 @@
 //! Structs to deal with newer BINK (>= `0x40`) product keys
 use std::fmt::{Display, Formatter};
 
-use anyhow::{bail, Result};
 use bitreader::BitReader;
 use num_bigint::{BigInt, BigUint, RandomBits};
 use num_integer::Integer;
@@ -15,6 +14,8 @@ use crate::{
     math::{bitmask, extract_bits, extract_ls_bits},
 };
 
+use super::{GenerationError, VerificationError};
+
 const FIELD_BITS: u64 = 512;
 const FIELD_BYTES: usize = 64;
 const SHA_MSG_LENGTH: usize = 3 + 2 * FIELD_BYTES;
@@ -26,12 +27,6 @@ const CHANNEL_ID_LENGTH_BITS: u8 = 10;
 const UPGRADE_LENGTH_BITS: u8 = 1;
 const EVERYTHING_ELSE: u8 =
     SIGNATURE_LENGTH_BITS + HASH_LENGTH_BITS + CHANNEL_ID_LENGTH_BITS + UPGRADE_LENGTH_BITS;
-
-#[must_use]
-enum VerificationResult {
-    Valid,
-    Invalid,
-}
 
 /// A product key for a BINK ID `0x40` or higher
 ///
@@ -55,7 +50,7 @@ impl ProductKey {
         channel_id: u32,
         auth_info: Option<u32>,
         upgrade: Option<bool>,
-    ) -> Result<Self> {
+    ) -> Result<Self, GenerationError> {
         // Generate random auth info if none supplied
         let auth_info = auth_info.unwrap_or_else(|| thread_rng().gen::<u32>() % AUTH_INFO_MAX);
 
@@ -83,16 +78,11 @@ impl ProductKey {
     ///
     /// * `curve` - The elliptic curve to use for verification.
     /// * `key` - Should be 25 characters long, not including the (optional) hyphens.
-    pub fn from_key(curve: &EllipticCurve, key: &str) -> Result<Self> {
+    pub fn from_key(curve: &EllipticCurve, key: &str) -> Result<Self, VerificationError> {
         let key = strip_key(key)?;
-        let Ok(packed_key) = base24_decode(&key) else {
-            bail!("Product key is in an incorrect format!")
-        };
+        let packed_key = base24_decode(&key);
         let product_key = Self::from_packed(&packed_key)?;
-        let verified = product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
-        if matches!(verified, VerificationResult::Invalid) {
-            bail!("Product key is invalid! Wrong BINK ID?");
-        }
+        product_key.verify(curve, &curve.gen_point, &curve.pub_point)?;
         Ok(product_key)
     }
 
@@ -104,7 +94,7 @@ impl ProductKey {
         channel_id: u32,
         auth_info: u32,
         upgrade: bool,
-    ) -> Result<Self> {
+    ) -> Result<Self, GenerationError> {
         let data = channel_id << 1 | upgrade as u32;
 
         let key = loop {
@@ -114,8 +104,8 @@ impl ProductKey {
             let hash = {
                 let r = e_curve.multiply_point(&seed, base_point);
 
-                let Point::Point{x, y} = r else {
-                    bail!("Point at infinity! Are the elliptic curve parameters correct?")
+                let Point::Point { x, y } = r else {
+                    return Err(GenerationError::InvalidParameters);
                 };
 
                 let x_bin = x.to_bytes_le().1;
@@ -189,7 +179,7 @@ impl ProductKey {
             s >>= 1;
 
             let Some(signature) = s.to_u64() else {
-                bail!("Signature is more than 64 bits! Are the elliptic curve parameters correct?")
+                return Err(GenerationError::InvalidParameters);
             };
 
             if signature <= bitmask(SIGNATURE_LENGTH_BITS as u64) {
@@ -211,7 +201,7 @@ impl ProductKey {
         e_curve: &EllipticCurve,
         base_point: &Point,
         public_key: &Point,
-    ) -> Result<VerificationResult> {
+    ) -> Result<(), VerificationError> {
         let data = self.channel_id << 1 | self.upgrade as u32;
 
         let mut msg_buffer = [0; 11];
@@ -242,18 +232,18 @@ impl ProductKey {
             e_curve.multiply_point(&s, &p)
         };
 
-        let Point::Point{x, y} = p else {
-            bail!("Point at infinity! Are the elliptic curve parameters correct?")
+        let Point::Point { x, y } = p else {
+            return Err(VerificationError::InvalidParameters);
         };
 
         let x_bin = x.to_bytes_le().1;
         if x_bin.len() > FIELD_BYTES {
-            bail!("x is too big somehow! Are the elliptic curve parameters correct?");
+            return Err(VerificationError::InvalidParameters);
         }
 
         let y_bin = y.to_bytes_le().1;
         if y_bin.len() > FIELD_BYTES {
-            bail!("y is too big somehow! Are the elliptic curve parameters correct?");
+            return Err(VerificationError::InvalidParameters);
         }
 
         let mut msg_buffer = [0; SHA_MSG_LENGTH];
@@ -270,14 +260,14 @@ impl ProductKey {
 
         let hash = extract_ls_bits(u32::from_le_bytes(msg_digest[0..4].try_into().unwrap()), 31);
 
-        if hash == self.hash {
-            Ok(VerificationResult::Valid)
+        if hash != self.hash {
+            Err(VerificationError::HashMismatch)
         } else {
-            Ok(VerificationResult::Invalid)
+            Ok(())
         }
     }
 
-    fn from_packed(packed_key: &BigUint) -> Result<Self> {
+    fn from_packed(packed_key: &BigUint) -> Result<Self, VerificationError> {
         let packed_key = packed_key.to_bytes_be();
         let mut reader = BitReader::new(&packed_key);
         // The auth info length isn't known, but everything else is, so we can calculate it
@@ -318,7 +308,7 @@ impl ProductKey {
 
 impl Display for ProductKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let pk = base24_encode(&self.pack()).unwrap();
+        let pk = base24_encode(&self.pack());
         let key = pk
             .chars()
             .enumerate()
@@ -370,7 +360,7 @@ mod tests {
         let kx = BigInt::from_str_radix(kx, 10).unwrap();
         let ky = BigInt::from_str_radix(ky, 10).unwrap();
 
-        let curve = EllipticCurve::new(p, a, gx, gy, kx, ky).unwrap();
+        let curve = EllipticCurve::new(p, a, gx, gy, kx, ky);
 
         assert!(super::ProductKey::from_key(&curve, product_key).is_ok());
         assert!(super::ProductKey::from_key(&curve, "11111-YRGC8-4KYTG-C3FCC-JCFDY").is_err());

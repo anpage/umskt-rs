@@ -68,8 +68,8 @@ fn generate(args: &GenerateArgs) -> Result<()> {
     let private_key = &bink.private;
     let private_key = BigInt::from_str_radix(private_key, 10).unwrap();
 
-    let curve = initialize_curve(bink, &bink_id)?;
-    let private_key = PrivateKey::new(gen_order, private_key)?;
+    let curve = initialize_curve(bink, &bink_id);
+    let private_key = PrivateKey::new(gen_order, private_key);
 
     if u32::from_str_radix(&bink_id, 16)? < 0x40 {
         if let Some(serial) = args.serial {
@@ -108,7 +108,7 @@ fn validate(args: &ValidateArgs) -> Result<()> {
     }
 
     let bink = &keys.bink[&bink_id];
-    let curve = initialize_curve(bink, &bink_id)?;
+    let curve = initialize_curve(bink, &bink_id);
 
     if u32::from_str_radix(&bink_id, 16)? < 0x40 {
         bink1998_validate(&curve, &args.key_to_check)?;
@@ -119,7 +119,7 @@ fn validate(args: &ValidateArgs) -> Result<()> {
     Ok(())
 }
 
-fn initialize_curve(bink: &Bink, bink_id: &str) -> Result<EllipticCurve> {
+fn initialize_curve(bink: &Bink, bink_id: &str) -> EllipticCurve {
     let p = &bink.p;
     let a = &bink.a;
     let gx = &bink.g.x;
