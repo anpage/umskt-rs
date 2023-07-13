@@ -304,6 +304,31 @@ impl ProductKey {
 
         BigUint::from_bytes_be(&packed_key.to_be_bytes())
     }
+
+    /// Returns the `upgrade` field encoded in the key
+    pub fn upgrade(&self) -> bool {
+        self.upgrade
+    }
+
+    /// Returns the `channel_id` field encoded in the key
+    pub fn channel_id(&self) -> u32 {
+        self.channel_id
+    }
+
+    /// Returns the `hash` field encoded in the key
+    pub fn hash(&self) -> u32 {
+        self.hash
+    }
+
+    /// Returns the `signature` field encoded in the key
+    pub fn signature(&self) -> u64 {
+        self.signature
+    }
+
+    /// Returns the `auth_info` field encoded in the key
+    pub fn auth_info(&self) -> u32 {
+        self.auth_info
+    }
 }
 
 impl Display for ProductKey {
