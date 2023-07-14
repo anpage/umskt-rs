@@ -1,9 +1,11 @@
 mod cli;
 mod keys;
 
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use clap::Parser;
-use keys::Bink;
+use keys::{Bink, Keys};
 use num_bigint::BigInt;
 use num_traits::Num;
 use umskt::{
@@ -14,6 +16,11 @@ use umskt::{
 };
 
 use crate::{cli::*, keys::load_keys};
+
+enum ProductKey {
+    Bink1998(bink1998::ProductKey),
+    Bink2002(bink2002::ProductKey),
+}
 
 fn main() -> Result<()> {
     let args = Cli::parse();
@@ -98,7 +105,11 @@ fn validate(args: &ValidateArgs) -> Result<()> {
     // We can validate any given key using the available public key: {p, a, b, G, K}.
     // No private key or gen_order is required.
     let keys = load_keys(args.keys_path.as_ref())?;
-    let bink_id = args.bink_id.to_ascii_uppercase();
+    let bink_id = if let Some(bink_id) = &args.bink_id {
+        bink_id.to_ascii_uppercase()
+    } else {
+        return validate_all(args, &keys);
+    };
 
     println!("Using BINK ID {bink_id}, which applies to these products:");
     for (key, value) in keys.products.iter() {
@@ -111,9 +122,61 @@ fn validate(args: &ValidateArgs) -> Result<()> {
     let curve = initialize_curve(bink, &bink_id);
 
     if u32::from_str_radix(&bink_id, 16)? < 0x40 {
-        bink1998_validate(&curve, &args.key_to_check)?;
+        let product_key = bink1998_validate(&curve, &args.key_to_check)?;
+        log::info!("{:#?}", product_key);
+        println!("{product_key}");
     } else {
-        bink2002_validate(&curve, &args.key_to_check)?;
+        let product_key = bink2002_validate(&curve, &args.key_to_check)?;
+        log::info!("{:#?}", product_key);
+        println!("{product_key}");
+    }
+
+    println!("Key validated successfully!");
+
+    Ok(())
+}
+
+fn validate_all(args: &ValidateArgs, keys: &Keys) -> Result<()> {
+    println!("No BINK ID specified, validating against all of them...");
+
+    let mut valid_bink_ids = HashMap::new();
+    let mut product_key: Option<ProductKey> = None;
+    for (name, product) in &keys.products {
+        for bink_id in &product.bink {
+            let bink = &keys.bink[bink_id];
+            let curve = initialize_curve(bink, bink_id);
+
+            if u32::from_str_radix(bink_id, 16)? < 0x40 {
+                if let Ok(key) = bink1998_validate(&curve, &args.key_to_check) {
+                    product_key = Some(ProductKey::Bink1998(key));
+                    valid_bink_ids.insert(name, bink_id);
+                }
+            } else if let Ok(key) = bink2002_validate(&curve, &args.key_to_check) {
+                product_key = Some(ProductKey::Bink2002(key));
+                valid_bink_ids.insert(name, bink_id);
+            }
+        }
+    }
+
+    match product_key {
+        Some(ProductKey::Bink1998(key)) => {
+            log::info!("{:#?}", key);
+            println!("{key}");
+        }
+        Some(ProductKey::Bink2002(key)) => {
+            log::info!("{:#?}", key);
+            println!("{key}");
+        }
+        None => {}
+    }
+
+    if valid_bink_ids.is_empty() {
+        println!("No valid BINK IDs found for this key.");
+    } else {
+        println!("Valid BINK IDs for this key:");
+        for (name, bink_id) in valid_bink_ids.iter() {
+            println!("    {} ({})", name, bink_id);
+        }
     }
 
     Ok(())
@@ -168,20 +231,12 @@ fn bink2002_generate(
     Ok(())
 }
 
-fn bink1998_validate(curve: &EllipticCurve, key: &str) -> Result<()> {
-    let product_key = bink1998::ProductKey::from_key(curve, key)?;
-    log::info!("{:#?}", product_key);
-    println!("{product_key}");
-    println!("Key validated successfully!");
-    Ok(())
+fn bink1998_validate(curve: &EllipticCurve, key: &str) -> Result<bink1998::ProductKey> {
+    Ok(bink1998::ProductKey::from_key(curve, key)?)
 }
 
-fn bink2002_validate(curve: &EllipticCurve, key: &str) -> Result<()> {
-    let product_key = bink2002::ProductKey::from_key(curve, key)?;
-    log::info!("{:#?}", product_key);
-    println!("{product_key}");
-    println!("Key validated successfully!");
-    Ok(())
+fn bink2002_validate(curve: &EllipticCurve, key: &str) -> Result<bink2002::ProductKey> {
+    Ok(bink2002::ProductKey::from_key(curve, key)?)
 }
 
 fn confirmation_id(args: &ConfirmationIdArgs) -> Result<()> {

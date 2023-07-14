@@ -60,8 +60,8 @@ pub struct GenerateArgs {
 #[derive(Args, Clone, Debug)]
 pub struct ValidateArgs {
     /// Which BINK identifier to use
-    #[arg(short, long = "bink", default_value = "2E")]
-    pub bink_id: String,
+    #[arg(short, long = "bink")]
+    pub bink_id: Option<String>,
 
     /// Optional path to load a keys.json file
     #[arg(short, long = "keys")]
