@@ -8,7 +8,6 @@ It does not include the required keys.json file used by UMSKT. That needs to be 
 These contributors helped create the UMSKT project that this codebase was based on:
 * z22
 * MSKey
-* sk00ter
 * diamondggg
 * pottzman
 * Endermanch
