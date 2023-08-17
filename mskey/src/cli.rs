@@ -55,6 +55,10 @@ pub struct GenerateArgs {
     /// Optional path to load a keys.json file
     #[arg(short, long = "keys")]
     pub keys_path: Option<String>,
+
+    /// Whether to generate "upgrade" keys
+    #[arg(short, long = "upgrade", default_value = "false")]
+    pub upgrade: bool,
 }
 
 #[derive(Args, Clone, Debug)]

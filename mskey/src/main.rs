@@ -89,13 +89,20 @@ fn generate(args: &GenerateArgs) -> Result<()> {
             &private_key,
             args.channel_id,
             args.serial,
+            args.upgrade,
             args.count,
         )?;
     } else {
         if args.serial.is_some() {
             bail!("Serial numbers do not apply for BINK IDs >= 0x40");
         }
-        bink2002_generate(&curve, &private_key, args.channel_id, args.count)?;
+        bink2002_generate(
+            &curve,
+            &private_key,
+            args.channel_id,
+            args.upgrade,
+            args.count,
+        )?;
     }
 
     Ok(())
@@ -207,10 +214,12 @@ fn bink1998_generate(
     private_key: &PrivateKey,
     channel_id: u32,
     serial: Option<u32>,
+    upgrade: bool,
     count: u64,
 ) -> Result<()> {
     for _ in 0..count {
-        let product_key = bink1998::ProductKey::new(curve, private_key, channel_id, serial, None)?;
+        let product_key =
+            bink1998::ProductKey::new(curve, private_key, channel_id, serial, Some(upgrade))?;
         log::info!("{:#?}", product_key);
         println!("{product_key}");
     }
@@ -221,10 +230,12 @@ fn bink2002_generate(
     curve: &EllipticCurve,
     private_key: &PrivateKey,
     channel_id: u32,
+    upgrade: bool,
     count: u64,
 ) -> Result<()> {
     for _ in 0..count {
-        let product_key = bink2002::ProductKey::new(curve, private_key, channel_id, None, None)?;
+        let product_key =
+            bink2002::ProductKey::new(curve, private_key, channel_id, None, Some(upgrade))?;
         log::info!("{:#?}", product_key);
         println!("{product_key}");
     }
