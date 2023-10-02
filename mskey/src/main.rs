@@ -59,6 +59,13 @@ fn generate(args: &GenerateArgs) -> Result<()> {
     let bink_id = args.bink_id.to_ascii_uppercase();
     let bink = &keys.bink[&bink_id];
 
+    let bink_id_num = u32::from_str_radix(&bink_id, 16)?;
+
+    // FE and FF are BINK 1998, but do not generate valid keys, so we throw an error
+    if bink_id_num >= 0xFE {
+        bail!("Terminal Services BINKs (FE and FF) are unsupported at this time");
+    }
+
     println!("Using BINK ID {bink_id}, which applies to these products:");
     for (key, value) in keys.products.iter() {
         if value.bink.contains(&bink_id) {
@@ -78,7 +85,7 @@ fn generate(args: &GenerateArgs) -> Result<()> {
     let curve = initialize_curve(bink, &bink_id);
     let private_key = PrivateKey::new(gen_order, private_key);
 
-    if u32::from_str_radix(&bink_id, 16)? < 0x40 {
+    if bink_id_num < 0x40 {
         if let Some(serial) = args.serial {
             if serial > 999999 {
                 bail!("Serial number must be 6 digits or fewer");
@@ -118,6 +125,13 @@ fn validate(args: &ValidateArgs) -> Result<()> {
         return validate_all(args, &keys);
     };
 
+    let bink_id_num = u32::from_str_radix(&bink_id, 16)?;
+
+    // FE and FF are BINK 1998, but do not generate valid keys, so we throw an error
+    if bink_id_num >= 0xFE {
+        bail!("Terminal Services BINKs (FE and FF) are unsupported at this time");
+    }
+
     println!("Using BINK ID {bink_id}, which applies to these products:");
     for (key, value) in keys.products.iter() {
         if value.bink.contains(&bink_id) {
@@ -128,7 +142,7 @@ fn validate(args: &ValidateArgs) -> Result<()> {
     let bink = &keys.bink[&bink_id];
     let curve = initialize_curve(bink, &bink_id);
 
-    if u32::from_str_radix(&bink_id, 16)? < 0x40 {
+    if bink_id_num < 0x40 {
         let product_key = bink1998_validate(&curve, &args.key_to_check)?;
         log::info!("{:#?}", product_key);
         println!("{product_key}");

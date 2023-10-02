@@ -1,4 +1,4 @@
-//! # Universal MS Key Toolkit (UMSKT) Rust Edition Rust Edition
+//! # Universal MS Key Toolkit (UMSKT) Rust Edition
 //!
 //! This is an unofficial Rust port of the [UMSKT project](https://github.com/UMSKT/UMSKT/).
 //!  It is a pure Rust implementation rather than a binding, so it does not require any C or
