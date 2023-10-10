@@ -1,6 +1,7 @@
 use std::mem::{size_of, swap};
 
 use num_bigint::BigUint;
+use sha1::{Digest, Sha1};
 
 use super::{ConfidResult, Error};
 
@@ -655,168 +656,41 @@ fn divisor_mul128(src: &TDivisor, mut mult_lo: u64, mut mult_hi: u64, dst: &mut 
     }
 }
 
-fn rol(x: u32, shift: i32) -> u32 {
-    x << shift | x >> (32_i32 - shift)
-}
+fn mix(buffer: &mut [u8], key: &[u8]) {
+    let half = buffer.len() / 2;
 
-fn sha1_single_block(input: &[u8], output: &mut [u8]) {
-    let mut a = 0x67452301_i32 as u32;
-    let mut b = 0xefcdab89_u32;
-    let mut c = 0x98badcfe_u32;
-    let mut d = 0x10325476_i32 as u32;
-    let mut e = 0xc3d2e1f0_u32;
-    let mut w: [u32; 80] = [0; 80];
-    let mut i = 0_i32 as usize;
-    while i < 16 {
-        w[i] = ((input[4_usize.wrapping_mul(i)] as i32) << 24_i32
-            | (input[4_usize.wrapping_mul(i).wrapping_add(1)] as i32) << 16_i32
-            | (input[4_usize.wrapping_mul(i).wrapping_add(2)] as i32) << 8_i32
-            | input[4_usize.wrapping_mul(i).wrapping_add(3)] as i32) as u32;
-        i = i.wrapping_add(1);
-    }
-    i = 16_i32 as usize;
-    while i < 80 {
-        w[i] = rol(
-            w[i.wrapping_sub(3)]
-                ^ w[i.wrapping_sub(8)]
-                ^ w[i.wrapping_sub(14)]
-                ^ w[i.wrapping_sub(16)],
-            1_i32,
-        );
-        i = i.wrapping_add(1);
-    }
-    i = 0_i32 as usize;
-    while i < 20 {
-        let tmp: u32 = (rol(a, 5_i32))
-            .wrapping_add(b & c | !b & d)
-            .wrapping_add(e)
-            .wrapping_add(w[i])
-            .wrapping_add(0x5a827999_i32 as u32);
-        e = d;
-        d = c;
-        c = rol(b, 30_i32);
-        b = a;
-        a = tmp;
-        i = i.wrapping_add(1);
-    }
-    i = 20_i32 as usize;
-    while i < 40 {
-        let tmp_0: u32 = (rol(a, 5_i32))
-            .wrapping_add(b ^ c ^ d)
-            .wrapping_add(e)
-            .wrapping_add(w[i])
-            .wrapping_add(0x6ed9eba1_i32 as u32);
-        e = d;
-        d = c;
-        c = rol(b, 30_i32);
-        b = a;
-        a = tmp_0;
-        i = i.wrapping_add(1);
-    }
-    i = 40_i32 as usize;
-    while i < 60 {
-        let tmp_1: u32 = (rol(a, 5_i32))
-            .wrapping_add(b & c | b & d | c & d)
-            .wrapping_add(e)
-            .wrapping_add(w[i])
-            .wrapping_add(0x8f1bbcdc_u32);
-        e = d;
-        d = c;
-        c = rol(b, 30_i32);
-        b = a;
-        a = tmp_1;
-        i = i.wrapping_add(1);
-    }
-    i = 60_i32 as usize;
-    while i < 80 {
-        let tmp_2: u32 = (rol(a, 5_i32))
-            .wrapping_add(b ^ c ^ d)
-            .wrapping_add(e)
-            .wrapping_add(w[i])
-            .wrapping_add(0xca62c1d6_u32);
-        e = d;
-        d = c;
-        c = rol(b, 30_i32);
-        b = a;
-        a = tmp_2;
-        i = i.wrapping_add(1);
-    }
-    a = a.wrapping_add(0x67452301_i32 as u32);
-    b = b.wrapping_add(0xefcdab89_u32);
-    c = c.wrapping_add(0x98badcfe_u32);
-    d = d.wrapping_add(0x10325476_i32 as u32);
-    e = e.wrapping_add(0xc3d2e1f0_u32);
-    output[0] = (a >> 24_i32) as u8;
-    output[1] = (a >> 16_i32) as u8;
-    output[2] = (a >> 8_i32) as u8;
-    output[3] = a as u8;
-    output[4] = (b >> 24_i32) as u8;
-    output[5] = (b >> 16_i32) as u8;
-    output[6] = (b >> 8_i32) as u8;
-    output[7] = b as u8;
-    output[8] = (c >> 24_i32) as u8;
-    output[9] = (c >> 16_i32) as u8;
-    output[10] = (c >> 8_i32) as u8;
-    output[11] = c as u8;
-    output[12] = (d >> 24_i32) as u8;
-    output[13] = (d >> 16_i32) as u8;
-    output[14] = (d >> 8_i32) as u8;
-    output[15] = d as u8;
-    output[16] = (e >> 24_i32) as u8;
-    output[17] = (e >> 16_i32) as u8;
-    output[18] = (e >> 8_i32) as u8;
-    output[19] = e as u8;
-}
+    for _ in 0..4 {
+        let sha1_input: Vec<u8> = [&buffer[half..], key].concat();
 
-fn mix(buffer: &mut [u8], buf_size: usize, key: &[u8], key_size: usize) {
-    let mut sha1_input: [u8; 64] = [0; 64];
-    let mut sha1_result: [u8; 20] = [0; 20];
-    let half: usize = buf_size.wrapping_div(2);
-    let mut external_counter = 0_i32;
-    while external_counter < 4_i32 {
-        for n in &mut sha1_input {
-            *n = 0;
+        let mut sha1_result = {
+            let mut hasher = Sha1::new();
+            hasher.update(sha1_input);
+            hasher.finalize()
+        };
+
+        for i in (half & !3)..half {
+            sha1_result[i] = sha1_result[i + 4 - (half & 3)];
         }
-        sha1_input[..half].copy_from_slice(&buffer[half..]);
-        sha1_input[half..half.wrapping_add(key_size)].copy_from_slice(key);
-        sha1_input[half.wrapping_add(key_size)] = 0x80_i32 as u8;
-        sha1_input[(size_of::<[u8; 64]>() as u64).wrapping_sub(1_i32 as u64) as usize] =
-            half.wrapping_add(key_size).wrapping_mul(8) as u8;
-        sha1_input[(size_of::<[u8; 64]>() as u64).wrapping_sub(2_i32 as u64) as usize] =
-            half.wrapping_add(key_size)
-                .wrapping_mul(8)
-                .wrapping_div(0x100) as u8;
-        sha1_single_block(&sha1_input, &mut sha1_result);
-        let mut i = half & !3;
-        while i < half {
-            sha1_result[i] = sha1_result[i.wrapping_add(4).wrapping_sub(half & 3)];
-            i = i.wrapping_add(1);
-        }
-        i = 0_i32 as usize;
-        while i < half {
-            let tmp: u8 = buffer[i.wrapping_add(half)];
-            buffer[i.wrapping_add(half)] = (buffer[i] as i32 ^ sha1_result[i] as i32) as u8;
+
+        for i in 0..half {
+            let tmp: u8 = buffer[i + half];
+            buffer[i + half] = buffer[i] ^ sha1_result[i];
             buffer[i] = tmp;
-            i = i.wrapping_add(1);
         }
-        external_counter += 1;
     }
 }
 
 fn unmix(buffer: &mut [u8], key: &[u8]) {
     let half = buffer.len() / 2;
-    let key_size = key.len();
 
     for _ in 0..4 {
-        let mut sha1_input = [0; 64];
-        sha1_input[..half].copy_from_slice(&buffer[..half]);
-        sha1_input[half..half + key_size].copy_from_slice(key);
-        sha1_input[half + key_size] = 0x80;
-        sha1_input[sha1_input.len() - 1] = ((half + key_size) * 8) as u8;
-        sha1_input[sha1_input.len() - 2] = (((half + key_size) * 8) / 0x100) as u8;
+        let sha1_input: Vec<u8> = [&buffer[..half], key].concat();
 
-        let mut sha1_result = [0; 20];
-        sha1_single_block(&sha1_input, &mut sha1_result);
+        let mut sha1_result = {
+            let mut hasher = Sha1::new();
+            hasher.update(sha1_input);
+            hasher.finalize()
+        };
 
         for i in (half & !3)..half {
             sha1_result[i] = sha1_result[i + 4 - (half & 3)];
@@ -940,7 +814,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     while attempt as i32 <= 0x80_i32 {
         let mut u: [u8; 14] = [0; 14];
         u[7_i32 as usize] = attempt;
-        mix(&mut u, 14_i32 as usize, &keybuf, 16_i32 as usize);
+        mix(&mut u, &keybuf);
         let u_lo = u64::from_le_bytes(u[0..8].try_into().unwrap());
         let u_hi = u64::from_le_bytes(
             u[8..14]
