@@ -35,6 +35,8 @@ static F: [u64; 6] = [
 const MOD: u64 = 0x16A6B036D7F2A79;
 const BAD: u64 = 0xffffffffffffffff;
 
+const IID_KEY: [u8; 4] = [0x6a, 0xc8, 0x5e, 0xd4];
+
 fn residue_add(x: u64, y: u64) -> u64 {
     let mut z: u64 = x.wrapping_add(y);
     //z = z - (z >= MOD ? MOD : 0);
@@ -801,38 +803,30 @@ fn mix(buffer: &mut [u8], buf_size: usize, key: &[u8], key_size: usize) {
     }
 }
 
-fn unmix(buffer: &mut [u8], buf_size: usize, key: &[u8], key_size: usize) {
-    let mut sha1_input: [u8; 64] = [0; 64];
-    let mut sha1_result: [u8; 20] = [0; 20];
-    let half: usize = buf_size.wrapping_div(2);
-    let mut external_counter = 0_i32;
-    while external_counter < 4_i32 {
-        for n in &mut sha1_input {
-            *n = 0;
-        }
+fn unmix(buffer: &mut [u8], key: &[u8]) {
+    let half = buffer.len() / 2;
+    let key_size = key.len();
+
+    for _ in 0..4 {
+        let mut sha1_input = [0; 64];
         sha1_input[..half].copy_from_slice(&buffer[..half]);
-        sha1_input[half..half.wrapping_add(key_size)].copy_from_slice(key);
-        sha1_input[half.wrapping_add(key_size)] = 0x80_i32 as u8;
-        sha1_input[(size_of::<[u8; 64]>() as u64).wrapping_sub(1_i32 as u64) as usize] =
-            half.wrapping_add(key_size).wrapping_mul(8) as u8;
-        sha1_input[(size_of::<[u8; 64]>() as u64).wrapping_sub(2_i32 as u64) as usize] =
-            half.wrapping_add(key_size)
-                .wrapping_mul(8)
-                .wrapping_div(0x100) as u8;
+        sha1_input[half..half + key_size].copy_from_slice(key);
+        sha1_input[half + key_size] = 0x80;
+        sha1_input[sha1_input.len() - 1] = ((half + key_size) * 8) as u8;
+        sha1_input[sha1_input.len() - 2] = (((half + key_size) * 8) / 0x100) as u8;
+
+        let mut sha1_result = [0; 20];
         sha1_single_block(&sha1_input, &mut sha1_result);
-        let mut i = half & !3;
-        while i < half {
-            sha1_result[i] = sha1_result[i.wrapping_add(4).wrapping_sub(half & 3)];
-            i = i.wrapping_add(1);
+
+        for i in (half & !3)..half {
+            sha1_result[i] = sha1_result[i + 4 - (half & 3)];
         }
-        i = 0_i32 as usize;
-        while i < half {
-            let tmp: u8 = buffer[i];
-            buffer[i] = (buffer[i.wrapping_add(half)] as i32 ^ sha1_result[i] as i32) as u8;
-            buffer[i.wrapping_add(half)] = tmp;
-            i = i.wrapping_add(1);
+
+        for i in 0..half {
+            let tmp = buffer[i];
+            buffer[i] = buffer[i + half] ^ sha1_result[i];
+            buffer[i + half] = tmp;
         }
-        external_counter += 1;
     }
 }
 
@@ -895,10 +889,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
         .unwrap()
         .to_bytes_le();
 
-    const IID_KEY: [u8; 4] = [0x6a, 0xc8, 0x5e, 0xd4];
-
-    let buf_size = installation_id.len();
-    unmix(&mut installation_id, buf_size, &IID_KEY, 4);
+    unmix(&mut installation_id, &IID_KEY);
 
     if installation_id[18] >= 0x10 {
         return Err(Error::UnknownVersion);
