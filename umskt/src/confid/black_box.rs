@@ -1,5 +1,9 @@
 use std::mem::{size_of, swap};
 
+use num_bigint::BigUint;
+
+use super::{ConfidResult, Error};
+
 #[derive(Copy, Clone)]
 struct TDivisor {
     u: [u64; 2],
@@ -17,7 +21,6 @@ struct ParsedInstallationId {
     hardware_id: u64,
     product_id_low: u64,
     product_id_high: u8,
-    key_sha1: u16,
 }
 
 static F: [u64; 6] = [
@@ -833,93 +836,92 @@ fn unmix(buffer: &mut [u8], buf_size: usize, key: &[u8], key_size: usize) {
     }
 }
 
-pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
-    let mut installation_id: [u8; 19] = [0; 19]; // 10**45 < 256**19
-    let mut installation_id_len: usize = 0_i32 as usize;
-    let mut count: usize = 0_i32 as usize;
-    let mut total_count: usize = 0_i32 as usize;
-    let mut check: u32 = 0_i32 as u32;
-    for p in installation_id_str.iter() {
-        let p_curr = *p as i8;
-        if !(p_curr as i32 == ' ' as i32 || p_curr as i32 == '-' as i32) {
-            let d: i32 = p_curr as i32 - '0' as i32;
-            if !(0_i32..=9_i32).contains(&d) {
-                return 3_i32;
-            }
-            if count == 5 {
-                if d as u32 != check.wrapping_rem(7_i32 as u32) {
-                    return if count < 5 { 1_i32 } else { 4_i32 };
-                }
-                check = 0_i32 as u32;
-                count = 0_i32 as usize;
+pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
+    // Filter out whitespace and hyphens
+    let installation_id_digits = installation_id_str
+        .chars()
+        .filter(|&c| !c.is_ascii_whitespace() && c != '-')
+        .map(|c| c.to_digit(10).ok_or(Error::InvalidCharacter))
+        .collect::<ConfidResult<Vec<_>>>()?;
+
+    // Check for too short
+    if installation_id_digits.len() < 54 {
+        return Err(Error::TooShort);
+    }
+
+    // Check for too long
+    if installation_id_digits.len() > 54 {
+        return Err(Error::TooLarge);
+    }
+
+    // Validate the check digits
+    // Every 6th digit is a check digit.
+    // The check digit is the remainder of the sum of the digits divided by 7,
+    // where every other digit is doubled before being added to the sum.
+    let invalid_check_digits = installation_id_digits
+        .chunks_exact(6)
+        .enumerate()
+        .filter_map(|(i, block)| {
+            let digits = &block[0..5];
+            let checksum = &block[5];
+            let calculated_checksum = digits
+                .iter()
+                .enumerate()
+                .fold(0, |acc, (i, x)| acc + x * (i as u32 % 2 + 1))
+                % 7;
+            if calculated_checksum != *checksum {
+                Some(i)
             } else {
-                check = check.wrapping_add(
-                    (if count.wrapping_rem(2) != 0 {
-                        d * 2_i32
-                    } else {
-                        d
-                    }) as u32,
-                );
-                count = count.wrapping_add(1);
-                total_count = total_count.wrapping_add(1);
-                if total_count > 45 {
-                    return 2_i32;
-                }
-                let mut carry: u8 = d as u8;
-                let mut i = 0_i32 as usize;
-                while i < installation_id_len {
-                    let x: u32 = (installation_id[i] as i32 * 10_i32 + carry as i32) as u32;
-                    installation_id[i] = (x & 0xff_i32 as u32) as u8;
-                    carry = (x >> 8_i32) as u8;
-                    i = i.wrapping_add(1);
-                }
-                if carry != 0 {
-                    let fresh1 = installation_id_len;
-                    installation_id_len = installation_id_len.wrapping_add(1);
-                    installation_id[fresh1] = carry;
-                }
+                None
             }
+        })
+        .collect::<Vec<_>>();
+
+    if !invalid_check_digits.is_empty() {
+        return Err(Error::InvalidCheckDigit {
+            indices: invalid_check_digits,
+        });
+    }
+
+    // Filter out check digits
+    let installation_id_digits = installation_id_digits
+        .chunks_exact(6)
+        .flat_map(|block| &block[0..5])
+        .map(|&x| x as u8)
+        .collect::<Vec<_>>();
+
+    // Convert from array of base 10 digits to byte array
+    let mut installation_id = BigUint::from_radix_be(&installation_id_digits, 10)
+        .unwrap()
+        .to_bytes_le();
+
+    const IID_KEY: [u8; 4] = [0x6a, 0xc8, 0x5e, 0xd4];
+
+    let buf_size = installation_id.len();
+    unmix(&mut installation_id, buf_size, &IID_KEY, 4);
+
+    if installation_id[18] >= 0x10 {
+        return Err(Error::UnknownVersion);
+    }
+
+    let parsed = {
+        let hardware_id_bytes: [u8; 8] = installation_id[0..8].try_into().unwrap();
+        let hardware_id = u64::from_le_bytes(hardware_id_bytes);
+
+        let product_id_low_bytes: [u8; 8] = installation_id[8..16].try_into().unwrap();
+        let product_id_low = u64::from_le_bytes(product_id_low_bytes);
+
+        let product_id_high = installation_id[16];
+
+        let key_sha1_bytes: [u8; 2] = installation_id[17..19].try_into().unwrap();
+        let _key_sha1 = u16::from_le_bytes(key_sha1_bytes);
+
+        ParsedInstallationId {
+            hardware_id,
+            product_id_low,
+            product_id_high,
         }
-    }
-    if total_count != 41 && total_count < 45 {
-        return 1_i32;
-    }
-    while installation_id_len < size_of::<[u8; 19]>() {
-        installation_id[installation_id_len] = 0_i32 as u8;
-        installation_id_len = installation_id_len.wrapping_add(1);
-    }
-    const IID_KEY: [u8; 4] = [
-        0x6a_i32 as u8,
-        0xc8_i32 as u8,
-        0x5e_i32 as u8,
-        0xd4_i32 as u8,
-    ];
-    unmix(
-        &mut installation_id,
-        (if total_count == 41 { 17_i32 } else { 19_i32 }) as usize,
-        &IID_KEY,
-        4_i32 as usize,
-    );
-    if installation_id[18_i32 as usize] as i32 >= 0x10_i32 {
-        return 5_i32;
-    }
-    let mut parsed = ParsedInstallationId {
-        hardware_id: 0,
-        product_id_low: 0,
-        product_id_high: 0,
-        key_sha1: 0,
     };
-
-    let hardware_id_bytes: [u8; 8] = installation_id[0..8].try_into().unwrap();
-    parsed.hardware_id = u64::from_le_bytes(hardware_id_bytes);
-
-    let product_id_low_bytes: [u8; 8] = installation_id[8..16].try_into().unwrap();
-    parsed.product_id_low = u64::from_le_bytes(product_id_low_bytes);
-
-    parsed.product_id_high = installation_id[16];
-
-    let key_sha1_bytes: [u8; 2] = installation_id[17..19].try_into().unwrap();
-    parsed.key_sha1 = u16::from_le_bytes(key_sha1_bytes);
 
     let product_id_1: u32 = (parsed.product_id_low & ((1_i32 << 17_i32) - 1_i32) as u64) as u32;
     let product_id_2: u32 =
@@ -929,8 +931,8 @@ pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
     let version: u32 = (parsed.product_id_low >> 52_i32 & 7_i32 as u64) as u32;
     let product_id_4: u32 = (parsed.product_id_low >> 55_i32
         | ((parsed.product_id_high as i32) << 9_i32) as u64) as u32;
-    if version != (if total_count == 41 { 4_i32 } else { 5_i32 }) as u32 {
-        return 5_i32;
+    if version != 5 {
+        return Err(Error::UnknownVersion);
     }
     let mut keybuf: [u8; 16] = [0; 16];
     keybuf[..8].copy_from_slice(&parsed.hardware_id.to_le_bytes()[..8]);
@@ -972,7 +974,7 @@ pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
         attempt = attempt.wrapping_add(1);
     }
     if attempt as i32 > 0x80_i32 {
-        return 6_i32;
+        return Err(Error::Unlucky);
     }
     divisor_mul128(
         &(d_0.clone()),
@@ -1068,7 +1070,7 @@ pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
         decimal[34_usize.wrapping_sub(i)] = c4 as u8;
         i = i.wrapping_add(1);
     }
-    let q = confirmation_id;
+    let mut q = [0u8; 48];
     let mut i: usize = 0;
     let mut q_i = 0;
     while i < 7 {
@@ -1092,5 +1094,5 @@ pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
         q_i = q_i.wrapping_add(6);
         i = i.wrapping_add(1);
     }
-    0_i32
+    Ok(String::from_utf8_lossy(&q).into())
 }
