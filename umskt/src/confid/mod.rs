@@ -33,12 +33,6 @@ pub enum ConfirmationIdError {
 /// # Arguments
 /// * `installation_id` - A string with 7 groups of 6 digits, with or without hyphens
 pub fn generate(installation_id: &str) -> Result<String, ConfirmationIdError> {
-    if installation_id.len() < 54 {
-        return Err(ConfirmationIdError::TooShort);
-    }
-    if installation_id.len() > 54 {
-        return Err(ConfirmationIdError::TooLarge);
-    }
     let inst_id = installation_id.as_bytes();
     let mut conf_id = [0u8; 48];
     let result = black_box::generate(inst_id, &mut conf_id);
@@ -80,6 +74,14 @@ mod tests {
         assert!(
             generate("334481558826870862843844566221823392794862457401103811")
                 .is_err_and(|err| err == ConfirmationIdError::InvalidCheckDigit),
+        );
+    }
+
+    #[test]
+    fn generate_v4() {
+        assert_eq!(
+            generate("140360-627153-508674-221690-171243-904021-659581-150052-92").unwrap(),
+            "109062-530373-462923-856922-378004-297663-022353"
         );
     }
 }

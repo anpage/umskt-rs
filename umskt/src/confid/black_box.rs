@@ -839,14 +839,15 @@ pub fn generate(installation_id_str: &[u8], confirmation_id: &mut [u8]) -> i32 {
     let mut count: usize = 0_i32 as usize;
     let mut total_count: usize = 0_i32 as usize;
     let mut check: u32 = 0_i32 as u32;
-    for p in installation_id_str.iter() {
+    let mut installation_id_str = installation_id_str.iter().peekable();
+    while let Some(p) = installation_id_str.next() {
         let p_curr = *p as i8;
         if !(p_curr as i32 == ' ' as i32 || p_curr as i32 == '-' as i32) {
             let d: i32 = p_curr as i32 - '0' as i32;
             if !(0_i32..=9_i32).contains(&d) {
                 return 3_i32;
             }
-            if count == 5 {
+            if count == 5 || installation_id_str.peek().is_none() {
                 if d as u32 != check.wrapping_rem(7_i32 as u32) {
                     return if count < 5 { 1_i32 } else { 4_i32 };
                 }
