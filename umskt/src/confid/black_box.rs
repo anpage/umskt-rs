@@ -1,4 +1,4 @@
-use std::mem::{size_of, swap};
+use std::mem::swap;
 
 use num_bigint::BigUint;
 use sha1::{Digest, Sha1};
@@ -656,50 +656,48 @@ fn divisor_mul128(src: &TDivisor, mut mult_lo: u64, mut mult_hi: u64, dst: &mut 
     }
 }
 
-fn mix(buffer: &mut [u8], key: &[u8]) {
+fn encrypt_feistel(buffer: &mut [u8], key: &[u8]) {
     let half = buffer.len() / 2;
 
     for _ in 0..4 {
-        let sha1_input: Vec<u8> = [&buffer[half..], key].concat();
-
-        let mut sha1_result = {
+        let hash = {
             let mut hasher = Sha1::new();
-            hasher.update(sha1_input);
-            hasher.finalize()
+            hasher.update([&buffer[half..], key].concat());
+            let mut result = hasher.finalize();
+
+            for i in (half & !3)..half {
+                result[i] = result[i + 4 - (half & 3)];
+            }
+
+            result
         };
 
-        for i in (half & !3)..half {
-            sha1_result[i] = sha1_result[i + 4 - (half & 3)];
-        }
-
         for i in 0..half {
-            let tmp: u8 = buffer[i + half];
-            buffer[i + half] = buffer[i] ^ sha1_result[i];
-            buffer[i] = tmp;
+            buffer[i] ^= hash[i];
+            buffer.swap(i + half, i);
         }
     }
 }
 
-fn unmix(buffer: &mut [u8], key: &[u8]) {
+fn decrypt_feistel(buffer: &mut [u8], key: &[u8]) {
     let half = buffer.len() / 2;
 
     for _ in 0..4 {
-        let sha1_input: Vec<u8> = [&buffer[..half], key].concat();
-
-        let mut sha1_result = {
+        let hash = {
             let mut hasher = Sha1::new();
-            hasher.update(sha1_input);
-            hasher.finalize()
+            hasher.update([&buffer[..half], key].concat());
+            let mut result = hasher.finalize();
+
+            for i in (half & !3)..half {
+                result[i] = result[i + 4 - (half & 3)];
+            }
+
+            result
         };
 
-        for i in (half & !3)..half {
-            sha1_result[i] = sha1_result[i + 4 - (half & 3)];
-        }
-
         for i in 0..half {
-            let tmp = buffer[i];
-            buffer[i] = buffer[i + half] ^ sha1_result[i];
-            buffer[i + half] = tmp;
+            buffer[i + half] ^= hash[i];
+            buffer.swap(i, i + half);
         }
     }
 }
@@ -764,7 +762,8 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
         .unwrap()
         .to_bytes_le();
 
-    unmix(&mut installation_id, &IID_KEY);
+    // Decrypt the installation ID using a special feistel cipher
+    decrypt_feistel(&mut installation_id, &IID_KEY);
 
     let parsed = {
         let hardware_id_bytes: [u8; 8] = installation_id[0..8].try_into().unwrap();
@@ -811,7 +810,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     while attempt as i32 <= 0x80_i32 {
         let mut u: [u8; 14] = [0; 14];
         u[7_i32 as usize] = attempt;
-        mix(&mut u, &keybuf);
+        encrypt_feistel(&mut u, &keybuf);
         let u_lo = u64::from_le_bytes(u[0..8].try_into().unwrap());
         let u_hi = u64::from_le_bytes(
             u[8..14]
