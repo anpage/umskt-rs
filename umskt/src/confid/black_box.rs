@@ -1,10 +1,10 @@
-use std::{iter::once, mem::swap};
+use std::mem::swap;
 
 use bitfield::bitfield;
 use num_bigint::BigUint;
 use sha1::{Digest, Sha1};
 
-use super::{ConfidResult, Error};
+use super::{ConfidResult, ConfirmationId, Error};
 
 #[derive(Copy, Clone, Default)]
 struct TDivisor {
@@ -19,7 +19,7 @@ struct Encoded {
 }
 
 bitfield! {
-    struct InstallationId([u8]);
+    struct UnpackedInstallationId([u8]);
     impl Debug;
     u64;
     hardware_id, _: 63, 0;
@@ -708,7 +708,7 @@ fn decrypt_feistel(buffer: &mut [u8], key: &[u8]) {
     }
 }
 
-pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
+pub fn generate(installation_id_str: &str) -> ConfidResult<ConfirmationId> {
     // Filter out whitespace and hyphens
     let installation_id_digits = installation_id_str
         .chars()
@@ -773,14 +773,14 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
 
     // Parse installation ID into its components
     let (hardware_id, rpc, chid, seq, version, last) = {
-        let parsed = InstallationId(&installation_id);
+        let unpacked = UnpackedInstallationId(&installation_id);
         (
-            parsed.hardware_id(),
-            parsed.rpc(),
-            parsed.chid(),
-            parsed.seq(),
-            parsed.version(),
-            parsed.last(),
+            unpacked.hardware_id(),
+            unpacked.rpc(),
+            unpacked.chid(),
+            unpacked.seq(),
+            unpacked.version(),
+            unpacked.last(),
         )
     };
 
@@ -872,25 +872,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     }
 
     let e_2 = [e.encoded_lo.to_le_bytes(), e.encoded_hi.to_le_bytes()].concat();
-    let confirmation_id = BigUint::from_bytes_le(&e_2)
-        .to_radix_be(10)
-        .chunks(5)
-        .map(|digits| {
-            let checksum = digits
-                .iter()
-                .enumerate()
-                .fold(0, |acc, (i, x)| acc + x * (i as u8 % 2 + 1))
-                % 7;
-            digits
-                .iter()
-                .cloned()
-                .chain(once(checksum))
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .concat()
-        })
-        .collect::<Vec<_>>()
-        .join("-");
+    let confirmation_id = ConfirmationId::from_bytes_le(&e_2);
 
     Ok(confirmation_id)
 }

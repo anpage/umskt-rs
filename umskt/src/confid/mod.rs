@@ -8,6 +8,9 @@
 //!
 //! The Rust version of the code was created by running the original through C2Rust
 //! and then manually fixing up the result.
+use std::fmt::Display;
+
+use num_bigint::BigUint;
 use thiserror::Error;
 
 mod black_box;
@@ -30,12 +33,45 @@ pub enum Error {
 
 pub type ConfidResult<T> = Result<T, Error>;
 
-/// Generates a confirmation ID from the given installation ID
-///
-/// # Arguments
-/// * `installation_id` - A string with 9 groups of 6 digits, with or without hyphens
-pub fn generate(installation_id: &str) -> ConfidResult<String> {
-    black_box::generate(installation_id)
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct ConfirmationId([String; 7]);
+
+impl ConfirmationId {
+    /// Generates a confirmation ID from the given installation ID
+    ///
+    /// # Arguments
+    /// * `installation_id` - A string with 9 groups of 6 digits, with or without hyphens
+    pub fn generate(installation_id: &str) -> ConfidResult<Self> {
+        black_box::generate(installation_id)
+    }
+
+    fn from_bytes_le(bytes: &[u8]) -> Self {
+        let confirmation_id = BigUint::from_bytes_le(bytes)
+            .to_radix_be(10)
+            .chunks(5)
+            .map(|digits| {
+                let number = digits.iter().fold(0, |acc, &digit| acc * 10 + digit as u32);
+                let checksum = digits
+                    .iter()
+                    .enumerate()
+                    .fold(0, |acc, (i, x)| acc + x * (i as u8 % 2 + 1))
+                    % 7;
+                format!("{:06}", number * 10 + checksum as u32)
+            })
+            .collect::<Vec<_>>();
+        Self(confirmation_id.try_into().unwrap())
+    }
+
+    pub fn group(&self, group: usize) -> &str {
+        &self.0[group]
+    }
+}
+
+impl Display for ConfirmationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let confirmation_id = self.0.join("-");
+        write!(f, "{}", confirmation_id)
+    }
 }
 
 #[cfg(test)]
@@ -45,43 +81,48 @@ mod tests {
     #[test]
     fn test_generate() {
         assert_eq!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-103810").unwrap(),
+            ConfirmationId::generate(
+                "334481-558826-870862-843844-566221-823392-794862-457401-103810"
+            )
+            .unwrap()
+            .to_string(),
             "110281-200130-887120-647974-697175-027544-252733"
         );
-        assert!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-1")
-                .is_err_and(|err| err == Error::TooShort),
-        );
-        assert!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-1038100")
-                .is_err_and(|err| err == Error::TooLarge),
-        );
-        assert!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-10381!")
-                .is_err_and(|err| err == Error::InvalidCharacter),
-        );
-        assert!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-103811")
-                .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![8] }),
-        );
-        assert!(
-            generate("334481-558826-870862-843840-566221-823392-794862-457401-103810")
-                .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![3] }),
-        );
-        assert!(
-            generate("334481-558826-870862-843840-566221-823390-794862-457401-103810").is_err_and(
-                |err| err
-                    == Error::InvalidCheckDigit {
-                        indices: vec![3, 5]
-                    }
-            ),
-        );
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843844-566221-823392-794862-457401-1"
+        )
+        .is_err_and(|err| err == Error::TooShort),);
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843844-566221-823392-794862-457401-1038100"
+        )
+        .is_err_and(|err| err == Error::TooLarge),);
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843844-566221-823392-794862-457401-10381!"
+        )
+        .is_err_and(|err| err == Error::InvalidCharacter),);
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843844-566221-823392-794862-457401-103811"
+        )
+        .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![8] }),);
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843840-566221-823392-794862-457401-103810"
+        )
+        .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![3] }),);
+        assert!(ConfirmationId::generate(
+            "334481-558826-870862-843840-566221-823390-794862-457401-103810"
+        )
+        .is_err_and(|err| err
+            == Error::InvalidCheckDigit {
+                indices: vec![3, 5]
+            }),);
     }
 
     #[test]
     fn test_v4() {
         assert_eq!(
-            generate("140360-627153-508674-221690-171243-904021-659581-150052-92").unwrap(),
+            ConfirmationId::generate("140360-627153-508674-221690-171243-904021-659581-150052-92")
+                .unwrap()
+                .to_string(),
             "109062-530373-462923-856922-378004-297663-022353"
         );
     }

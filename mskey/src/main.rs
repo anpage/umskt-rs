@@ -265,7 +265,7 @@ fn bink2002_validate(curve: &EllipticCurve, key: &str) -> Result<bink2002::Produ
 }
 
 fn confirmation_id(args: &ConfirmationIdArgs) -> Result<()> {
-    let confirmation_id = confid::generate(&args.instid)?;
+    let confirmation_id = confid::ConfirmationId::generate(&args.instid)?;
     println!("Confirmation ID: {confirmation_id}");
     Ok(())
 }
