@@ -1,5 +1,6 @@
 use std::mem::swap;
 
+use bitfield::bitfield;
 use num_bigint::BigUint;
 use sha1::{Digest, Sha1};
 
@@ -17,11 +18,16 @@ struct Encoded {
     encoded_hi: u64,
 }
 
-#[derive(Copy, Clone)]
-struct ParsedInstallationId {
-    hardware_id: u64,
-    product_id_low: u64,
-    product_id_high: u8,
+bitfield! {
+    struct InstallationId([u8]);
+    impl Debug;
+    u64;
+    hardware_id, _: 63, 0;
+    rpc, _: 80, 64;
+    chid, _: 90, 81;
+    seq, _: 115, 91;
+    version, _: 118, 116;
+    last, _: 135, 119;
 }
 
 static F: [u64; 6] = [
@@ -765,55 +771,41 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     // Decrypt the installation ID using a special feistel cipher
     decrypt_feistel(&mut installation_id, &IID_KEY);
 
-    let parsed = {
-        let hardware_id_bytes: [u8; 8] = installation_id[0..8].try_into().unwrap();
-        let hardware_id = u64::from_le_bytes(hardware_id_bytes);
-
-        let product_id_low_bytes: [u8; 8] = installation_id[8..16].try_into().unwrap();
-        let product_id_low = u64::from_le_bytes(product_id_low_bytes);
-
-        let product_id_high = installation_id[16];
-
-        ParsedInstallationId {
-            hardware_id,
-            product_id_low,
-            product_id_high,
-        }
+    // Parse installation ID into its components
+    let (hardware_id, rpc, chid, seq, version, last) = {
+        let parsed = InstallationId(&installation_id);
+        (
+            parsed.hardware_id(),
+            parsed.rpc(),
+            parsed.chid(),
+            parsed.seq(),
+            parsed.version(),
+            parsed.last(),
+        )
     };
 
-    let product_id_1: u32 = (parsed.product_id_low & ((1_i32 << 17_i32) - 1_i32) as u64) as u32;
-    let product_id_2: u32 =
-        (parsed.product_id_low >> 17_i32 & ((1_i32 << 10_i32) - 1_i32) as u64) as u32;
-    let product_id_3: u32 =
-        (parsed.product_id_low >> 27_i32 & ((1_i32 << 25_i32) - 1_i32) as u64) as u32;
-    let version: u32 = (parsed.product_id_low >> 52_i32 & 7_i32 as u64) as u32;
-    let product_id_4: u32 = (parsed.product_id_low >> 55_i32
-        | ((parsed.product_id_high as i32) << 9_i32) as u64) as u32;
-
+    // Check for known version (currently 4 and 5)
     match version {
         4 | 5 => {}
-        version => return Err(Error::UnknownVersion(version)),
+        version => return Err(Error::UnknownVersion(version as u32)),
     }
 
-    let mut keybuf: [u8; 16] = [0; 16];
-    keybuf[..8].copy_from_slice(&parsed.hardware_id.to_le_bytes()[..8]);
-    let product_id_mixed: u64 = (product_id_1 as u64) << 41_i32
-        | (product_id_2 as u64) << 58_i32
-        | (product_id_3 as u64) << 17_i32
-        | product_id_4 as u64;
-    keybuf[8..16].copy_from_slice(&product_id_mixed.to_le_bytes()[..8]);
+    // Build the feistel cipher key for the later confirmation ID
+    let product_id_mixed = chid << 58 | rpc << 41 | seq << 17 | last;
+    let cid_key = [hardware_id.to_le_bytes(), product_id_mixed.to_le_bytes()].concat();
+
     let mut d_0: TDivisor = TDivisor {
         u: [0; 2],
         v: [0; 2],
     };
-    let mut attempt = 0_i32 as u8;
-    while attempt as i32 <= 0x80_i32 {
-        let mut u: [u8; 14] = [0; 14];
-        u[7_i32 as usize] = attempt;
-        encrypt_feistel(&mut u, &keybuf);
-        let u_lo = u64::from_le_bytes(u[0..8].try_into().unwrap());
+    let mut attempt = 0;
+    while attempt <= 0x80 {
+        let mut cid: [u8; 14] = [0; 14];
+        cid[7_i32 as usize] = attempt;
+        encrypt_feistel(&mut cid, &cid_key);
+        let u_lo = u64::from_le_bytes(cid[0..8].try_into().unwrap());
         let u_hi = u64::from_le_bytes(
-            u[8..14]
+            cid[8..14]
                 .iter()
                 .chain([0, 0].iter())
                 .cloned()
@@ -821,20 +813,18 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
                 .try_into()
                 .unwrap(),
         );
-        let mut x2: u64 = ui128_quotient_mod(u_lo, u_hi);
-        let x1: u64 = u_lo.wrapping_sub(x2.wrapping_mul(MOD));
+        let mut x2 = ui128_quotient_mod(u_lo, u_hi);
+        let x1 = u_lo.wrapping_sub(x2.wrapping_mul(MOD));
         x2 = x2.wrapping_add(1);
-        d_0.u[0_i32 as usize] = residue_sub(
-            residue_mul(x1, x1),
-            residue_mul(43_i32 as u64, residue_mul(x2, x2)),
-        );
-        d_0.u[1_i32 as usize] = residue_add(x1, x1);
+        d_0.u[0] = residue_sub(residue_mul(x1, x1), residue_mul(43, residue_mul(x2, x2)));
+        d_0.u[1] = residue_add(x1, x1);
         if find_divisor_v(&mut d_0) != 0 {
             break;
         }
         attempt = attempt.wrapping_add(1);
     }
-    if attempt as i32 > 0x80_i32 {
+
+    if attempt > 0x80 {
         return Err(Error::Unlucky);
     }
     divisor_mul128(
