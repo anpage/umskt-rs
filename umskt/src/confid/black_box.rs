@@ -827,72 +827,52 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     if attempt > 0x80 {
         return Err(Error::Unlucky);
     }
-    divisor_mul128(
-        &(d_0.clone()),
-        0x4e21b9d10f127c1_i64 as u64,
-        0x40da7c36d44c_i64 as u64,
-        &mut d_0,
-    );
+
+    divisor_mul128(&(d_0.clone()), 0x4e21b9d10f127c1, 0x40da7c36d44c, &mut d_0);
     let mut e = Encoded {
         encoded_lo: 0,
         encoded_hi: 0,
     };
-    if d_0.u[0_i32 as usize] == BAD {
+    if d_0.u[0] == BAD {
         // we can not get the zero divisor, actually...
-        e.encoded_lo = umul128(MOD.wrapping_add(2_i32 as u64), MOD, &mut e.encoded_hi);
-    } else if d_0.u[1_i32 as usize] == BAD {
-        e.encoded_lo = umul128(
-            MOD.wrapping_add(1_i32 as u64),
-            d_0.u[0_i32 as usize],
-            &mut e.encoded_hi,
-        );
+        e.encoded_lo = umul128(MOD.wrapping_add(2), MOD, &mut e.encoded_hi);
+    } else if d_0.u[1] == BAD {
+        e.encoded_lo = umul128(MOD.wrapping_add(1), d_0.u[0], &mut e.encoded_hi);
         e.encoded_lo = e.encoded_lo.wrapping_add(MOD);
-        e.encoded_hi = e
-            .encoded_hi
-            .wrapping_add((e.encoded_lo < MOD) as i32 as u64);
+        e.encoded_hi = e.encoded_hi.wrapping_add((e.encoded_lo < MOD) as u64);
     } else {
-        let x1_0: u64 = (if d_0.u[1_i32 as usize] as i32 % 2_i32 != 0 {
-            d_0.u[1_i32 as usize].wrapping_add(MOD)
+        let x1_0: u64 = (if d_0.u[1] % 2 != 0 {
+            d_0.u[1].wrapping_add(MOD)
         } else {
-            d_0.u[1_i32 as usize]
+            d_0.u[1]
         })
-        .wrapping_div(2_i32 as u64);
-        let x2sqr: u64 = residue_sub(residue_mul(x1_0, x1_0), d_0.u[0_i32 as usize]);
+        .wrapping_div(2);
+        let x2sqr: u64 = residue_sub(residue_mul(x1_0, x1_0), d_0.u[0]);
         let mut x2_0: u64 = residue_sqrt(x2sqr);
         if x2_0 == BAD {
-            x2_0 = residue_sqrt(residue_mul(x2sqr, residue_inv(43_i32 as u64)));
+            x2_0 = residue_sqrt(residue_mul(x2sqr, residue_inv(43)));
             e.encoded_lo = umul128(
-                MOD.wrapping_add(1_i32 as u64),
+                MOD.wrapping_add(1),
                 MOD.wrapping_add(x2_0),
                 &mut e.encoded_hi,
             );
             e.encoded_lo = e.encoded_lo.wrapping_add(x1_0);
-            e.encoded_hi = e
-                .encoded_hi
-                .wrapping_add((e.encoded_lo < x1_0) as i32 as u64);
+            e.encoded_hi = e.encoded_hi.wrapping_add((e.encoded_lo < x1_0) as u64);
         } else {
             // points (-x1+x2, v(-x1+x2)) and (-x1-x2, v(-x1-x2))
             let mut x1a: u64 = residue_sub(x1_0, x2_0);
-            let y1: u64 = residue_sub(
-                d_0.v[0_i32 as usize],
-                residue_mul(d_0.v[1_i32 as usize], x1a),
-            );
+            let y1: u64 = residue_sub(d_0.v[0], residue_mul(d_0.v[1], x1a));
             let mut x2a: u64 = residue_add(x1_0, x2_0);
-            let y2: u64 = residue_sub(
-                d_0.v[0_i32 as usize],
-                residue_mul(d_0.v[1_i32 as usize], x2a),
-            );
+            let y2: u64 = residue_sub(d_0.v[0], residue_mul(d_0.v[1], x2a));
             if x1a > x2a {
                 swap(&mut x1a, &mut x2a);
             }
-            if (y1 ^ y2) & 1_i32 as u64 != 0 {
+            if (y1 ^ y2) & 1 != 0 {
                 swap(&mut x1a, &mut x2a);
             }
-            e.encoded_lo = umul128(MOD.wrapping_add(1_i32 as u64), x1a, &mut e.encoded_hi);
+            e.encoded_lo = umul128(MOD.wrapping_add(1), x1a, &mut e.encoded_hi);
             e.encoded_lo = e.encoded_lo.wrapping_add(x2a);
-            e.encoded_hi = e
-                .encoded_hi
-                .wrapping_add((e.encoded_lo < x2a) as i32 as u64);
+            e.encoded_hi = e.encoded_hi.wrapping_add((e.encoded_lo < x2a) as u64);
         }
     }
     let mut e_2 = [
@@ -902,22 +882,16 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
         u32::from_le_bytes(e.encoded_hi.to_le_bytes()[4..].try_into().unwrap()),
     ];
     let mut decimal: [u8; 35] = [0; 35];
-    let mut i = 0_i32 as usize;
+    let mut i = 0;
     while i < 35 {
-        let c: u32 = (e_2[3_i32 as usize]).wrapping_rem(10_i32 as u32);
-        e_2[3_i32 as usize] = e_2[3_i32 as usize].wrapping_div(10_i32 as u32);
-        let c2: u32 =
-            ((c as u64) << 32_i32 | e_2[2_i32 as usize] as u64).wrapping_rem(10_i32 as u64) as u32;
-        e_2[2_i32 as usize] =
-            ((c as u64) << 32_i32 | e_2[2_i32 as usize] as u64).wrapping_div(10_i32 as u64) as u32;
-        let c3: u32 =
-            ((c2 as u64) << 32_i32 | e_2[1_i32 as usize] as u64).wrapping_rem(10_i32 as u64) as u32;
-        e_2[1_i32 as usize] =
-            ((c2 as u64) << 32_i32 | e_2[1_i32 as usize] as u64).wrapping_div(10_i32 as u64) as u32;
-        let c4: u32 =
-            ((c3 as u64) << 32_i32 | e_2[0_i32 as usize] as u64).wrapping_rem(10_i32 as u64) as u32;
-        e_2[0_i32 as usize] =
-            ((c3 as u64) << 32_i32 | e_2[0_i32 as usize] as u64).wrapping_div(10_i32 as u64) as u32;
+        let c: u32 = (e_2[3]).wrapping_rem(10);
+        e_2[3] = e_2[3].wrapping_div(10);
+        let c2: u32 = ((c as u64) << 32 | e_2[2] as u64).wrapping_rem(10) as u32;
+        e_2[2] = ((c as u64) << 32 | e_2[2] as u64).wrapping_div(10) as u32;
+        let c3: u32 = ((c2 as u64) << 32 | e_2[1] as u64).wrapping_rem(10) as u32;
+        e_2[1] = ((c2 as u64) << 32 | e_2[1] as u64).wrapping_div(10) as u32;
+        let c4: u32 = ((c3 as u64) << 32 | e_2[0] as u64).wrapping_rem(10) as u32;
+        e_2[0] = ((c3 as u64) << 32 | e_2[0] as u64).wrapping_div(10) as u32;
         decimal[34_usize.wrapping_sub(i)] = c4 as u8;
         i = i.wrapping_add(1);
     }
