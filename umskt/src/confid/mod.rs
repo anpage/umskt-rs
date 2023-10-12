@@ -31,7 +31,9 @@ pub enum ConfirmationIdError {
 /// Generates a confirmation ID from the given installation ID
 ///
 /// # Arguments
-/// * `installation_id` - A string with 7 groups of 6 digits, with or without hyphens
+/// * `installation_id` - A string with 7 groups of 6 digits, with or without hyphens.
+/// The 7th group might have 2 digits, in the case of a v4 Installation ID.
+///
 pub fn generate(installation_id: &str) -> Result<String, ConfirmationIdError> {
     let inst_id = installation_id.as_bytes();
     let mut conf_id = [0u8; 48];
