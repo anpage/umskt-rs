@@ -1,4 +1,4 @@
-use std::mem::swap;
+use std::{iter::once, mem::swap};
 
 use bitfield::bitfield;
 use num_bigint::BigUint;
@@ -870,49 +870,27 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
             e.encoded_hi = e.encoded_hi.wrapping_add((e.encoded_lo < x2a) as u64);
         }
     }
-    let mut e_2 = [
-        u32::from_le_bytes(e.encoded_lo.to_le_bytes()[0..4].try_into().unwrap()),
-        u32::from_le_bytes(e.encoded_lo.to_le_bytes()[4..].try_into().unwrap()),
-        u32::from_le_bytes(e.encoded_hi.to_le_bytes()[0..4].try_into().unwrap()),
-        u32::from_le_bytes(e.encoded_hi.to_le_bytes()[4..].try_into().unwrap()),
-    ];
-    let mut decimal: [u8; 35] = [0; 35];
-    let mut i = 0;
-    while i < 35 {
-        let c: u32 = (e_2[3]).wrapping_rem(10);
-        e_2[3] = e_2[3].wrapping_div(10);
-        let c2: u32 = ((c as u64) << 32 | e_2[2] as u64).wrapping_rem(10) as u32;
-        e_2[2] = ((c as u64) << 32 | e_2[2] as u64).wrapping_div(10) as u32;
-        let c3: u32 = ((c2 as u64) << 32 | e_2[1] as u64).wrapping_rem(10) as u32;
-        e_2[1] = ((c2 as u64) << 32 | e_2[1] as u64).wrapping_div(10) as u32;
-        let c4: u32 = ((c3 as u64) << 32 | e_2[0] as u64).wrapping_rem(10) as u32;
-        e_2[0] = ((c3 as u64) << 32 | e_2[0] as u64).wrapping_div(10) as u32;
-        decimal[34_usize.wrapping_sub(i)] = c4 as u8;
-        i = i.wrapping_add(1);
-    }
-    let mut q = [0u8; 48];
-    let mut i: usize = 0;
-    let mut q_i = 0;
-    while i < 7 {
-        if i != 0 {
-            q[q_i] = b'-';
-            q_i += 1;
-        }
-        let p_0: &mut [u8] = &mut decimal[i.wrapping_mul(5)..];
-        q[q_i] = (p_0[0] as i32 + '0' as i32) as u8;
-        q[q_i + 1] = (p_0[1] as i32 + '0' as i32) as u8;
-        q[q_i + 2] = (p_0[2] as i32 + '0' as i32) as u8;
-        q[q_i + 3] = (p_0[3] as i32 + '0' as i32) as u8;
-        q[q_i + 4] = (p_0[4] as i32 + '0' as i32) as u8;
-        q[q_i + 5] = ((p_0[0] as i32
-            + p_0[1] as i32 * 2_i32
-            + p_0[2] as i32
-            + p_0[3] as i32 * 2_i32
-            + p_0[4] as i32)
-            % 7_i32
-            + '0' as i32) as u8;
-        q_i = q_i.wrapping_add(6);
-        i = i.wrapping_add(1);
-    }
-    Ok(String::from_utf8_lossy(&q).into())
+
+    let e_2 = [e.encoded_lo.to_le_bytes(), e.encoded_hi.to_le_bytes()].concat();
+    let confirmation_id = BigUint::from_bytes_le(&e_2)
+        .to_radix_be(10)
+        .chunks(5)
+        .map(|digits| {
+            let checksum = digits
+                .iter()
+                .enumerate()
+                .fold(0, |acc, (i, x)| acc + x * (i as u8 % 2 + 1))
+                % 7;
+            digits
+                .iter()
+                .cloned()
+                .chain(once(checksum))
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .concat()
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+
+    Ok(confirmation_id)
 }
