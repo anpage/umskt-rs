@@ -6,13 +6,13 @@ use sha1::{Digest, Sha1};
 
 use super::{ConfidResult, Error};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 struct TDivisor {
     u: [u64; 2],
     v: [u64; 2],
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 struct Encoded {
     encoded_lo: u64,
     encoded_hi: u64,
@@ -794,10 +794,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     let product_id_mixed = chid << 58 | rpc << 41 | seq << 17 | last;
     let cid_key = [hardware_id.to_le_bytes(), product_id_mixed.to_le_bytes()].concat();
 
-    let mut d_0: TDivisor = TDivisor {
-        u: [0; 2],
-        v: [0; 2],
-    };
+    let mut d_0 = TDivisor::default();
     let mut attempt = 0;
     while attempt <= 0x80 {
         let mut cid: [u8; 14] = [0; 14];
@@ -829,10 +826,8 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     }
 
     divisor_mul128(&(d_0.clone()), 0x4e21b9d10f127c1, 0x40da7c36d44c, &mut d_0);
-    let mut e = Encoded {
-        encoded_lo: 0,
-        encoded_hi: 0,
-    };
+
+    let mut e = Encoded::default();
     if d_0.u[0] == BAD {
         // we can not get the zero divisor, actually...
         e.encoded_lo = umul128(MOD.wrapping_add(2), MOD, &mut e.encoded_hi);
