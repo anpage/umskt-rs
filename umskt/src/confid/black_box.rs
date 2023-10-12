@@ -713,7 +713,7 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
         .collect::<ConfidResult<Vec<_>>>()?;
 
     // Check for too short
-    if installation_id_digits.len() < 54 {
+    if installation_id_digits.len() < 50 {
         return Err(Error::TooShort);
     }
 
@@ -727,11 +727,12 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     // The check digit is the remainder of the sum of the digits divided by 7,
     // where every other digit is doubled before being added to the sum.
     let invalid_check_digits = installation_id_digits
-        .chunks_exact(6)
+        .chunks(6)
         .enumerate()
         .filter_map(|(i, block)| {
-            let digits = &block[0..5];
-            let checksum = &block[5];
+            let block_size = block.len();
+            let digits = &block[0..block_size - 1];
+            let checksum = &block[block_size - 1];
             let calculated_checksum = digits
                 .iter()
                 .enumerate()
@@ -753,8 +754,8 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
 
     // Filter out check digits
     let installation_id_digits = installation_id_digits
-        .chunks_exact(6)
-        .flat_map(|block| &block[0..5])
+        .chunks(6)
+        .flat_map(|block| &block[0..block.len() - 1])
         .map(|&x| x as u8)
         .collect::<Vec<_>>();
 
@@ -765,10 +766,6 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
 
     unmix(&mut installation_id, &IID_KEY);
 
-    if installation_id[18] >= 0x10 {
-        return Err(Error::UnknownVersion);
-    }
-
     let parsed = {
         let hardware_id_bytes: [u8; 8] = installation_id[0..8].try_into().unwrap();
         let hardware_id = u64::from_le_bytes(hardware_id_bytes);
@@ -777,9 +774,6 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
         let product_id_low = u64::from_le_bytes(product_id_low_bytes);
 
         let product_id_high = installation_id[16];
-
-        let key_sha1_bytes: [u8; 2] = installation_id[17..19].try_into().unwrap();
-        let _key_sha1 = u16::from_le_bytes(key_sha1_bytes);
 
         ParsedInstallationId {
             hardware_id,
@@ -796,9 +790,12 @@ pub fn generate(installation_id_str: &str) -> ConfidResult<String> {
     let version: u32 = (parsed.product_id_low >> 52_i32 & 7_i32 as u64) as u32;
     let product_id_4: u32 = (parsed.product_id_low >> 55_i32
         | ((parsed.product_id_high as i32) << 9_i32) as u64) as u32;
-    if version != 5 {
-        return Err(Error::UnknownVersion);
+
+    match version {
+        4 | 5 => {}
+        version => return Err(Error::UnknownVersion(version)),
     }
+
     let mut keybuf: [u8; 16] = [0; 16];
     keybuf[..8].copy_from_slice(&parsed.hardware_id.to_le_bytes()[..8]);
     let product_id_mixed: u64 = (product_id_1 as u64) << 41_i32

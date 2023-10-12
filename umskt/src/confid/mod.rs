@@ -23,7 +23,7 @@ pub enum Error {
     #[error("Installation ID checksum failed. Please check that it is typed correctly.")]
     InvalidCheckDigit { indices: Vec<usize> },
     #[error("Unknown installation ID version.")]
-    UnknownVersion,
+    UnknownVersion(u32),
     #[error("Unable to generate valid confirmation ID.")]
     Unlucky,
 }
@@ -35,17 +35,7 @@ pub type ConfidResult<T> = Result<T, Error>;
 /// # Arguments
 /// * `installation_id` - A string with 9 groups of 6 digits, with or without hyphens
 pub fn generate(installation_id: &str) -> ConfidResult<String> {
-    let installation_id = installation_id.replace('-', "");
-
-    if installation_id.len() < 54 {
-        return Err(Error::TooShort);
-    }
-
-    if installation_id.len() > 54 {
-        return Err(Error::TooLarge);
-    }
-
-    black_box::generate(&installation_id)
+    black_box::generate(installation_id)
 }
 
 #[cfg(test)]
@@ -59,7 +49,7 @@ mod tests {
             "110281-200130-887120-647974-697175-027544-252733"
         );
         assert!(
-            generate("334481-558826-870862-843844-566221-823392-794862-457401-10381")
+            generate("334481-558826-870862-843844-566221-823392-794862-457401-1")
                 .is_err_and(|err| err == Error::TooShort),
         );
         assert!(
@@ -85,6 +75,14 @@ mod tests {
                         indices: vec![3, 5]
                     }
             ),
+        );
+    }
+
+    #[test]
+    fn test_v4() {
+        assert_eq!(
+            generate("140360-627153-508674-221690-171243-904021-659581-150052-92").unwrap(),
+            "109062-530373-462923-856922-378004-297663-022353"
         );
     }
 }
