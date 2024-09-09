@@ -79,7 +79,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate() {
+    fn it_generates_confirmation_ids() {
         assert_eq!(
             ConfirmationId::generate(
                 "334481-558826-870862-843844-566221-823392-794862-457401-103810"
@@ -88,26 +88,69 @@ mod tests {
             .to_string(),
             "110281-200130-887120-647974-697175-027544-252733"
         );
+
+        assert_eq!(
+            ConfirmationId::generate(
+                "015376-811004-218111-392360-687140-576052-300430-580044-267525"
+            )
+            .unwrap()
+            .to_string(),
+            "181431-498050-981512-188303-121962-771530-007354"
+        );
+    }
+
+    #[test]
+    fn it_generates_confirmation_id_v4() {
+        assert_eq!(
+            ConfirmationId::generate("140360-627153-508674-221690-171243-904021-659581-150052-92")
+                .unwrap()
+                .to_string(),
+            "109062-530373-462923-856922-378004-297663-022353"
+        );
+    }
+
+    #[test]
+    fn it_rejects_too_short() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843844-566221-823392-794862-457401-1"
         )
         .is_err_and(|err| err == Error::TooShort),);
+    }
+
+    #[test]
+    fn it_rejects_too_long() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843844-566221-823392-794862-457401-1038100"
         )
         .is_err_and(|err| err == Error::TooLarge),);
+    }
+
+    #[test]
+    fn it_rejects_invalid_characters() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843844-566221-823392-794862-457401-10381!"
         )
         .is_err_and(|err| err == Error::InvalidCharacter),);
+    }
+
+    #[test]
+    fn it_validates_check_digit_9th() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843844-566221-823392-794862-457401-103811"
         )
         .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![8] }),);
+    }
+
+    #[test]
+    fn it_validates_check_digit_4th() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843840-566221-823392-794862-457401-103810"
         )
         .is_err_and(|err| err == Error::InvalidCheckDigit { indices: vec![3] }),);
+    }
+
+    #[test]
+    fn it_validates_check_digits() {
         assert!(ConfirmationId::generate(
             "334481-558826-870862-843840-566221-823390-794862-457401-103810"
         )
@@ -115,15 +158,5 @@ mod tests {
             == Error::InvalidCheckDigit {
                 indices: vec![3, 5]
             }),);
-    }
-
-    #[test]
-    fn test_v4() {
-        assert_eq!(
-            ConfirmationId::generate("140360-627153-508674-221690-171243-904021-659581-150052-92")
-                .unwrap()
-                .to_string(),
-            "109062-530373-462923-856922-378004-297663-022353"
-        );
     }
 }
