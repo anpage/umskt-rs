@@ -1,0 +1,52 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Get keys.json
+      shell: bash
+      run: |
+        git clone --no-checkout --depth 1 https://github.com/UMSKT/UMSKT UMSKT_clone
+        cd UMSKT_clone
+        git sparse-checkout set keys.json
+        git checkout
+        mv keys.json ../keys.json
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run
+      shell: bash
+      run: |
+        echo "Test 1 - generating key (BINK1998)"
+        cargo run -- -v generate -b 2C -c 365
+        echo "Test 2 - generating key (BINK2002)"
+        cargo run -- -v generate -b 5A -c 640
+        echo "Test 3 - generating confid"
+        cargo run -- -v confid 253286028742154311079061239762245184619981623171292574
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: mskey-${{ matrix.os }}
+        path: |
+          target/debug/mskey
+          target/debug/mskey.exe
+        if-no-files-found: error
